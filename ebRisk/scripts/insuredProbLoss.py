@@ -79,11 +79,11 @@ if COMPUTE_RESOURCE == "THlaptop":
     surfgeolfile = '/Users/thobbs/Documents/gsc_surficial_geology.gdb'
     outdir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out' #for result tables
 elif COMPUTE_RESOURCE == "AWS":
-    PARQUET_DIR = "local/scratch/parquet-out"
-    expofile = ""
-    denseCSDs = ""
-    surfgeolfile = ""
-    outdir = ""
+    PARQUET_DIR = "/scratch/parquet-out"
+    expofile = "/work/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.csv"
+    denseCSDs = "/work/CanadaSRM-input/current/exposure/popdensCSD.txt"
+    surfgeolfile = "/work/CanadaSRM-input/current/geotech/gsc_surficial_geology.gdb"
+    outdir = "/work/CanadaSRM-output/probabilistic/current/ebRisk/ins-out"
 
 # Temporary insurance params: penetration rate, deductible, policy limit
 insdic_w_res = {'p': 0.55, 'd': 0.125, 'l': 1.11} #1.883}

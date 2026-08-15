@@ -26,6 +26,16 @@ quants="False" #if True assumes quantiles of 0.05, 0.5, 0.95
 insScript="/Users/thobbs/Documents/CanadaSRM-code/ebRisk/scripts/insuredProbLoss.py"
 oqdataDir="/Users/thobbs/oqdata"
 
+oqIndir="/work/CanadaSRM-code/ebRisk/input/"
+oqOutdir="/work/CanadaSRM-output/probabilistic/current/ebRisk/oq-out"
+iniFileName="ebRisk_b0_Canada_Long_Expo2025_TestSmall.ini"
+quants="False"
+insScript="/work/CanadaSRM-code/ebRisk/scripts/insuredProbLoss.py"
+oqdataDir="/home/ssm-user/oqdata"
+
+
+COMPUTE_RESOURCE="AWS" #THlaptop
+
 ### INITIALIZE PARAMS, FOLDERS
 region="Canada"
 calc="b0"; calcnum="-1"
@@ -34,7 +44,7 @@ prov=$region
 mkdir -p ${oqOutdir}/${prov}
 
 # Mount point of the EC2 instance NVMe filesystem
-TMPDIR="/mnt/nvme"
+TMPDIR="/scratch"
 
 # Where benchmark results will be stored
 STATS_DIR="$TMPDIR/benchmark_stats" #!!!!!!! CHANGE TO EB
@@ -431,7 +441,7 @@ echo " Starting custom Parquet processing"
 echo "============================================================"
 
 ### RUN INS/2PER MODULE
-python ${insScript} $CALC_ID ${oqIndir}${iniFileName} THlaptop &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log;
+python ${insScript} $CALC_ID ${oqIndir}${iniFileName} $COMPUTE_RESOURCE &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log;
 
 PYTHON_PID=$!
 
