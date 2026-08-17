@@ -242,7 +242,7 @@ losses = losses.merge(events[['id','mag','occurrence_rate','source_name']], how=
 
 #### Assign asset_id from aid
 assetcol = dstore["assetcol"]; assets = assetcol.to_dframe()
-lookup = assets[["ordinal","id","SS_Region"]].copy() #grab aid, asset_id, and ss_region
+lookup = assets[["ordinal","id","ss_region"]].copy() #grab aid, asset_id, and ss_region
 lookup.rename(columns={"id": "asset_id"},inplace=True)
 del assets; gc.collect(); #clear up memory by deleting df
 
@@ -266,10 +266,10 @@ for eid in losses['event_id'].unique():
     if missing:
         raise RuntimeError(f"{missing} aids could not be matched") 
     
-    for region in as_loss_by_event['SS_Region'].unique():
+    for region in as_loss_by_event['ss_region'].unique():
         #print('debug: working on SS_region: '+str(region))
         # split by SS_region
-        losreg = as_loss_by_event[as_loss_by_event['SS_Region'] == region]
+        losreg = as_loss_by_event[as_loss_by_event['ss_region'] == region]
         losreg = losreg.merge(expo[['id','structural','nonstructural','contents','number','lon','lat','OccClass']], left_on="asset_id", right_on="id", how="left"); losreg = losreg.drop(columns='id') #add expo
         losreg['totalVal'] = losreg['structural']+losreg['nonstructural']+losreg['contents']
         
@@ -318,12 +318,12 @@ for eid in losses['event_id'].unique():
             if not data.empty:
                 # set insurance parameters
                 if (TYPE == 'RES'):
-                    if (data['SS_Region'].unique()[0] == 'West'):
+                    if (data['ss_region'].unique()[0] == 'West'):
                         insdic = insdic_w_res
                     else:
                         insdic = insdic_e_res
                 elif (TYPE == 'COM'):
-                    if (data['SS_Region'].unique()[0] == 'West'):
+                    if (data['ss_region'].unique()[0] == 'West'):
                         insdic = insdic_w_com
                     else:
                         insdic = insdic_e_com

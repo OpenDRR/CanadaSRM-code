@@ -26,7 +26,7 @@ quants="False" #if True assumes quantiles of 0.05, 0.5, 0.95
 insScript="/Users/thobbs/Documents/CanadaSRM-code/ebRisk/scripts/insuredProbLoss.py"
 oqdataDir="/Users/thobbs/oqdata"
 
-oqIndir="/work/CanadaSRM-code/ebRisk/input/"
+oqIndir="/work/CanadaSRM-code/ebRisk/input"
 oqOutdir="/work/CanadaSRM-output/probabilistic/current/ebRisk/oq-out"
 iniFileName="ebRisk_b0_Canada_Long_Expo2025_TestSmall.ini"
 quants="False"
@@ -75,14 +75,14 @@ for cmd in pidstat iostat mpstat free df awk ps pgrep; do
 done
 
 ### SETUP AWS KILL 
-set -E
+#set -E
 
-shut_down_ec2_instance() {
-    echo "Shutting down EC2 instance"
-    sudo shutdown -h now
-    }
+#shut_down_ec2_instance() {
+#    echo "Shutting down EC2 instance"
+#    sudo shutdown -h now
+#}
 
-trap shut_down_ec2_instance ERR
+#trap shut_down_ec2_instance ERR
 
 
 # ============================================================
@@ -441,7 +441,7 @@ echo " Starting custom Parquet processing"
 echo "============================================================"
 
 ### RUN INS/2PER MODULE
-python ${insScript} $CALC_ID ${oqIndir}${iniFileName} $COMPUTE_RESOURCE &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log;
+python ${insScript} $CALC_ID ${oqIndir}/${iniFileName} $COMPUTE_RESOURCE &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log;
 
 PYTHON_PID=$!
 
@@ -659,4 +659,4 @@ echo
 echo "Benchmark completed successfully."
 
 ### AWS KILL
-shut_down_ec2_instance
+#shut_down_ec2_instance
