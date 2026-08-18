@@ -128,7 +128,7 @@ def inscalc(data,TYPE):
     # To use insurance params at the FSA level without needing to break the calc down by FSA, take p_rate chance for each asset instead of assigning properties until p_rate achieved. 
     data['rando'] = np.random.rand(len(data))
     data['ins_val'] = data['totalVal'].where(data['rando'] < data['EQ_Pene'], 0)
-    data['unins_loss'] = data['max_EQpolicy_loss'].where(data['ins_val'] > 0, 0) #uninsured amount WITHOUT ALE/BI #was loss_pla
+    data['unins_loss'] = data['max_EQpolicy_loss'].where(data['ins_val'] == 0, 0) #uninsured amount WITHOUT ALE/BI #was loss_pla
     data['deduc'] = data['ins_val']*data['EQDeducPerc'] #deductible as % of value
     data['ins_loss'] = (data['EQLimPerc']*data['max_EQpolicy_loss']).where(data['rando'] < data['EQ_Pene'], 0) #insured loss: product of limit ratio and loss. #was loss_pla
     data['deduc_gap'] = (data['deduc'] - data['max_EQpolicy_loss']).where((data['deduc'] - data['max_EQpolicy_loss']) > 0,0) #how close is loss to deductible #was loss_pla
@@ -229,13 +229,13 @@ del assets; gc.collect(); #clear up memory by deleting df
     
 #### Load parquet file[s]
 dataset = ds.dataset(glob.glob(f"{PARQUET_DIR}/asset_event_losses_*.parquet"),format="parquet") #read all parquets in current dir
-files = dataset.files; batch_size = 100
+files = dataset.files; batch_size = 10
 parqNum = 0
 for i in range(0, len(files), batch_size):
     batch_files = files[i:i + batch_size]
     batch_dataset = ds.dataset(batch_files, format="parquet")
     losses = batch_dataset.to_table().to_pandas()
-
+    
     print(f"Processing files {i}–{i + len(batch_files) - 1}")
     #print(f"Rows: {len(losses):,}")
     #print(f"Memory: {losses.memory_usage(deep=True).sum() / 1024**3:.2f} GB")
@@ -245,18 +245,18 @@ for i in range(0, len(files), batch_size):
     losses = losses[losses['loss'] >= 5000] #drop losses less than 5000 (min asset loss)
     losses.drop(losses[losses.loss_type == 'occupants'].index, inplace=True) #remove occupants losses if they exist
     losses = losses.groupby(["event_id", "aid"])["loss"].sum().reset_index() #merge loss types to get total loss in "loss" column
-
-
+    
+    
     #### Initialize results dataframe
     ResTable = pd.DataFrame(columns=['eid', 'RP_GU_EQ', 'mag', 'occ_rate', 'ss_region', 'LOB', "GU_EQOnly_loss", "GU_LQOnly_loss", 'GU_EQLQ_loss', 'ins_EQLQ_loss', 'PH_EQLQ_loss', 'UI_EQLQ_loss']) #event, return period of loss, magnitude, occurrence rate of that rupture, region, line of business, ground up lossese [EQ only, LQ only, higher of EQ/LQ], claimed loss paid by insurer, policy-holder (deductible) loss, and uninsured loss.
-
-
+    
+    
     #### Merge loss info with supporting metadata
     losses = losses.merge(lbe[['event_id', 'PLA', 'RP']], how='left', on='event_id') #merge with loss by event table
     losses['loss_pla'] = losses['loss']*losses['PLA'] #get loss with amplification
     losses = losses.merge(events[['id','mag','occurrence_rate','source_name']], how='left', left_on='event_id', right_on='id'); losses = losses.drop(columns = 'id') #add source info 
-
-
+    
+    
     #### Calc insured losses for each event
     print('Calculating insured losses by event!')
     # isolate each event
@@ -268,18 +268,18 @@ for i in range(0, len(files), batch_size):
         missing = as_loss_by_event["asset_id"].isna().sum()
         if missing:
             raise RuntimeError(f"{missing} aids could not be matched") 
-
+        
         # merge with expo
         as_loss_by_event = as_loss_by_event.merge(expo[['id','structural','nonstructural','contents','number','lon','lat','OccClass','pruid', 'fsauid']], left_on="asset_id", right_on="id", how="left"); as_loss_by_event = as_loss_by_event.drop(columns='id') #add expo
-
+        
         # assign East (1) and West (2) by province
         as_loss_by_event['ss_region'] = np.select([as_loss_by_event["pruid"].isin(Eprovs), as_loss_by_event["pruid"].isin(Wprovs)], [1, 2], default=np.nan).astype(int)
-
+        
         for region in as_loss_by_event['ss_region'].unique():
             # split by ss_region
             losreg = as_loss_by_event[as_loss_by_event['ss_region'] == region]
             losreg['totalVal'] = losreg['structural']+losreg['nonstructural']+losreg['contents']
-
+            
             losreg['LQloss'] = 0.0 # Add liq info, only for events with mag above liq thresh
             if mag >= mag_LQ_thresh:
                 #print('debug: Adding liquefaction')
@@ -290,9 +290,9 @@ for i in range(0, len(files), batch_size):
                 if not missing.empty:
                     nearest = gpd.sjoin_nearest(missing, surficial[["liq_class", "geometry"]], how="left", distance_col="distance_to_polygon")
                     losreg_gdf.loc[nearest.index] = nearest
-
+                
                 losreg = pd.DataFrame(losreg_gdf.drop(columns=["geometry", "index_right"]))
-
+                
                 # Calc the liq impact and propagate (careful not to conflate with shake loss)
                 # Giving buildings in 'High' or 'Very High' LQ susc to have 4% chance of complete loss and 9% chance of 50% loss
                 # May be small numbers so using probability per asset instead of total number of bldgs
@@ -303,14 +303,14 @@ for i in range(0, len(files), batch_size):
                         losreg.at[ind,'LQloss'] = row['totalVal']
                     elif rando_val < (LQ_rate['p_100']+LQ_rate['p_50']):
                         losreg.at[ind,'LQloss'] = 0.5*row['totalVal']
-
+            
             losreg['max_EQpolicy_loss'] = np.maximum(losreg['LQloss'], losreg['loss_pla'])
-
+            
             # Separate RES and COM
             RES = losreg[losreg['OccClass'].isin(['RES1', 'RES2'])]
             COM = losreg[losreg['OccClass'].isin(['RES3A', 'RES3C', 'RES3D', 'RES3B', 'RES3F', 'RES3E','RES3','RES4','RES5', 'RES6', 'COM1', 'COM2','COM3','COM4','COM5','COM6','COM7', 'COM8', 'COM9','COM10','IND1', 'IND2', 'IND3', 'IND4', 'IND5', 'IND6', 'AGR1', 'REL1'])]
             PUB = losreg[~losreg['OccClass'].isin(['RES1', 'RES2','RES3A', 'RES3C', 'RES3D', 'RES3B', 'RES3F', 'RES3E','RES3','RES4','RES5', 'RES6', 'COM1', 'COM2','COM3','COM4','COM5','COM6','COM7', 'COM8', 'COM9','COM10','IND1', 'IND2', 'IND3', 'IND4', 'IND5', 'IND6', 'AGR1', 'REL1'])]
-
+            
             # Run calculations on each line of business (LOB)
             for TYPE in ['RES','COM','PUB']:
                 #print('debug: working on TYPE: '+TYPE)
@@ -323,7 +323,7 @@ for i in range(0, len(files), batch_size):
                     data = data.merge(COMparams[['FSA','EQDeducPerc','EQLimPerc','EQ_Pene']], how="left", left_on="fsauid", right_on="FSA").drop(columns='FSA')
                 else:
                     data = PUB
-
+                
                 # Insurance calculation
                 if not data.empty:
                     GU_EQLQ_loss = data['max_EQpolicy_loss'].sum() #calc ground up (no BI/ALE) EQ/LQ losses (keep higher of EQ/LQ)
@@ -387,6 +387,10 @@ for i in range(0, len(files), batch_size):
 ## add axis labels
 #plt.title('Insured Loss EP Curve')
 #plt.savefig(outdir+'/SummaryEP_'+str(CALC_ID)+'.png')
+
+
+#### Aggregate all csvs
+
 
 
 #### End Calc Timer

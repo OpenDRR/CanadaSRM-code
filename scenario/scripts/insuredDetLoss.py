@@ -104,10 +104,10 @@ COMparams = ins_params[ins_params['LoB'] == 'C']
 LQ_rate = {'p_100': 0.04, 'p_50': 0.09} #probability of having 100% or 50% loss, for bldgs with High/Very High LQ susceptibility
 mag_LQ_thresh = 6.5 #minimum magnitude of earthquake to create liquefaction
 
-# Provide approx return periods and source loc for scenarios, for PLA and TSUNAMI ONLY (below)
+# Provide APPROXIMATE return periods and source loc for scenarios, for PLA, FFE and TSUNAMI ONLY (below)
 scen_lookup = pd.DataFrame({
     'scen': ['SIM9p1_CascadiaInterfaceBestFault', 'SIM9p2_CascadiaInterfaceBestFault', 'SCM7p5_MontrealIapetan', 'SCM5p8_MontrealIapetan', 'ACM7p0_GeorgiaStraitASHOCK'],
-    'RP': [500, 700, 10000, 1500, 1500],
+    'RP': [500, 700, 10000, 4000, 2000],
     'sourcezone': ['CSZ', 'CSZ', 'SC', 'SC', 'AC']})
 scenName = INI_FILENAME.split('_Risk_')[1].split('_b0')[0] ### NOTE: THIS ASSUMES BASELINE ONLY
 RP = scen_lookup['RP'][scen_lookup['scen'] == scenName].values[0]
@@ -132,7 +132,7 @@ def inscalc(data,TYPE):
     # To use insurance params at the FSA level without needing to break the calc down by FSA, take p_rate chance for each asset instead of assigning properties until p_rate achieved. 
     data['rando'] = np.random.rand(len(data))
     data['ins_val'] = data['totalVal'].where(data['rando'] < data['EQ_Pene'], 0)
-    data['unins_loss'] = data['max_EQpolicy_loss'].where(data['ins_val'] > 0, 0) #uninsured amount WITHOUT ALE/BI #was loss_pla
+    data['unins_loss'] = data['max_EQpolicy_loss'].where(data['ins_val'] == 0, 0) #uninsured amount WITHOUT ALE/BI #was loss_pla
     data['deduc'] = data['ins_val']*data['EQDeducPerc'] #deductible as % of value
     data['ins_loss'] = (data['EQLimPerc']*data['max_EQpolicy_loss']).where(data['rando'] < data['EQ_Pene'], 0) #insured loss: product of limit ratio and loss. #was loss_pla
     data['deduc_gap'] = (data['deduc'] - data['max_EQpolicy_loss']).where((data['deduc'] - data['max_EQpolicy_loss']) > 0,0) #how close is loss to deductible #was loss_pla
@@ -179,7 +179,7 @@ liq_lookup = {#from ChatGPT interpretting Youd&Perkins/FEMA liq susc method
 surficial["liq_class"] = (surficial["label"].map(liq_lookup).fillna("Unknown"))
 
 #### Initialize results dataframe
-ResTable = pd.DataFrame(columns=['eid', 'RP_GU_EQ', 'mag', 'occ_rate', 'ss_region', 'LOB', "GU_EQOnly_loss", "GU_LQOnly_loss", 'GU_EQLQ_loss', 'ins_EQLQ_loss', 'PH_EQLQ_loss', 'UI_EQLQ_loss']) #event, return period of loss, magnitude, occurrence rate of that rupture, region, line of business, ground up lossese [EQ only, LQ only, higher of EQ/LQ], claimed loss paid by insurer, policy-holder (deductible) loss, and uninsured loss.
+ResTable = pd.DataFrame(columns=['APPROX_EQ_RP', 'mag', 'LOB', "GU_EQOnly_loss", "GU_LQOnly_loss", 'GU_EQLQ_loss', 'ins_EQLQ_loss', 'PH_EQLQ_loss', 'UI_EQLQ_loss']) #event, return period of loss, magnitude, occurrence rate of that rupture, region, line of business, ground up lossese [EQ only, LQ only, higher of EQ/LQ], claimed loss paid by insurer, policy-holder (deductible) loss, and uninsured loss.
 
 
 #### Get source model information 
@@ -214,7 +214,7 @@ losses['loss'] = losses['contents']+losses['nonstructural']+losses['structural']
 csd_keep = losses.groupby('csduid')['loss'].sum().loc[lambda x: x > 0].index.tolist()
 as_loss_by_event = losses[losses['csduid'].isin(csd_keep)].copy()
 as_loss_by_event['loss_pla'] = as_loss_by_event['loss']*PLA #get loss with amplification
-as_loss_by_event = as_loss_by_event.merge(expo[['id','structural','nonstructural','contents','number','fsauid']], left_on="asset_id", right_on="id", how="left", suffixes=('_loss', '_val')); as_loss_by_event = as_loss_by_event.drop(columns='id') #add expo
+as_loss_by_event = as_loss_by_event.merge(expo[['id','structural','nonstructural','contents','number']], left_on="asset_id", right_on="id", how="left", suffixes=('_loss', '_val')); as_loss_by_event = as_loss_by_event.drop(columns='id') #add expo
 del expo; del losses; gc.collect(); #clear up memory by deleting dfs
 
 
@@ -265,7 +265,7 @@ for TYPE in ['RES','COM','PUB']:
         data = data.merge(COMparams[['FSA','EQDeducPerc','EQLimPerc','EQ_Pene']], how="left", left_on="fsauid", right_on="FSA").drop(columns='FSA')
     else:
         data = PUB
-
+    
     # Insurance calculation
     if not data.empty:
         GU_EQLQ_loss = data['max_EQpolicy_loss'].sum() #calc ground up (no BI/ALE) EQ/LQ losses (keep higher of EQ/LQ)
@@ -279,13 +279,13 @@ for TYPE in ['RES','COM','PUB']:
         else:
             [claim_tot, deduc_tot, unins_tot] = inscalc(data,TYPE) #run insurance calculation
             ############ In theory could run this multiple times and take the average
-        ResTable.loc[len(ResTable)] = [eid, RP, mag, occ_rate, region, TYPE, GU_EQOnly_loss, GU_LQOnly_loss, GU_EQLQ_loss, claim_tot, deduc_tot, unins_tot] # add info to result table
+        ResTable.loc[len(ResTable)] = [RP, mag, TYPE, GU_EQOnly_loss, GU_LQOnly_loss, GU_EQLQ_loss, claim_tot, deduc_tot, unins_tot] # add info to result table
 
 
 #### Sum insured loss by LOB for total event loss, add auto loss and sum shake total
-summary = ResTable.groupby(["eid", "RP_GU_EQ", 'mag', 'occ_rate', "ss_region"])[["GU_EQOnly_loss", "GU_LQOnly_loss", "GU_EQLQ_loss","ins_EQLQ_loss","PH_EQLQ_loss","UI_EQLQ_loss"]].sum().reset_index()
+summary = ResTable.groupby(["APPROX_EQ_RP", 'mag'])[["GU_EQOnly_loss", "GU_LQOnly_loss", "GU_EQLQ_loss","ins_EQLQ_loss","PH_EQLQ_loss","UI_EQLQ_loss"]].sum().reset_index()
 summary['auto_EQLQ_loss'] = (0.004*summary['GU_EQLQ_loss'])/0.996 #auto is 0.04% per PACICC - I'm making it a % of GU not ins only
-summary['EQLQTotal'] = summary['ins_EQLQ_loss']+summary['PH_EQLQ_loss']+summary['UI_EQLQ_loss']+summary['auto_EQLQ_loss']
+summary['EQLQTot_withAuto'] = summary['ins_EQLQ_loss']+summary['PH_EQLQ_loss']+summary['UI_EQLQ_loss']+summary['auto_EQLQ_loss']
 
  
 
@@ -295,43 +295,28 @@ summary['EQLQTotal'] = summary['ins_EQLQ_loss']+summary['PH_EQLQ_loss']+summary[
 ffe_lookup = pd.DataFrame({
     'RP':  [0, 250, 500, 1000, 500000],
     'FFE': [0.02, 0.02, 0.05, 0.10, 0.10]}) #must be ascending
-summary['FFE_factor'] = np.interp(summary['RP_GU_EQ'], ffe_lookup['RP'], ffe_lookup['FFE'])
-summary['FFE_loss'] = ((summary['EQLQTotal'])/(1-summary['FFE_factor']))-summary['EQLQTotal']
+summary['FFE_factor'] = np.interp(summary['APPROX_EQ_RP'], ffe_lookup['RP'], ffe_lookup['FFE'])
+summary['FFE_loss'] = ((summary['EQLQTot_withAuto'])/(1-summary['FFE_factor']))-summary['EQLQTot_withAuto']
 
 
 #### Add Tsunami Loss
 # based on AIR, for CASCADIA INTERFACE only: it represents (4273/49972) of total losses (including ALE/BI) and (1117/17078) of insured losses (seems to have already subtracted deductible, so only applying to "ins").
-# Isolate CSZ events
-CSZ_eids = events[events['source_name'].str.contains('CIS')]['id'].values
-# Add tsunami for those events
 summary['tot_tsunami'] = 0; summary['ins_tsunami'] = 0
-for eid in CSZ_eids:
-    if summary[summary['eid'] == eid].index.values:
-        for ind_val in summary[summary['eid'] == eid].index.values:
-            summary.at[ind_val, 'tot_tsunami'] = summary.iloc[ind_val]['EQLQTotal']*(4273/49972)
-            summary.at[ind_val, 'ins_tsunami'] = summary.iloc[ind_val]['ins_EQLQ_loss']*(1117/17078)
+# Isolate CSZ events
+if source == 'CSZ':
+    # Add tsunami for this event
+    summary['tot_tsunami'] = summary['EQLQTot_withAuto']*(4273/49972)
+    summary['ins_tsunami'] = summary['ins_EQLQ_loss']*(1117/17078)
 
 
 #### Calculate total cost to the insurance sector
 summary['TotCostToIns'] = summary['ins_tsunami']+summary['ins_EQLQ_loss']+summary['auto_EQLQ_loss']+summary['FFE_loss']
-# get the RP of the insured loss
-ilbe = summary[['eid','TotCostToIns']].sort_values('TotCostToIns', ascending=False).reset_index()
-ilbe['RP_Ins'] = eff_time/((ilbe.index)+1)
-summary = summary.merge(ilbe[['eid','RP_Ins']], how='left', on='eid')
+summary['TotCost_EQLQAutoSecPerils'] = summary['EQLQTot_withAuto'] + summary['tot_tsunami'] + summary['FFE_loss']
 
 
 #### Save Results
 ResTable.to_csv(outdir+'/Shake_by_LOB_'+str(CALC_ID)+'.csv')
 summary.to_csv(outdir+'/Summary_'+str(CALC_ID)+'.csv')
-
-
-#### Plot EP Curve - NATIONAL, EAST, WEST - WORKING HERE.
-plt.figure(figsize=(5, 5))
-plt.scatter(summary['RP_Ins'], summary['TotCostToIns'])
-# make this a log plot, color by GU loss to show that they're totally unrelated. 
-# add axis labels
-plt.title('Insured Loss EP Curve')
-plt.savefig(outdir+'/SummaryEP_'+str(CALC_ID)+'.png')
 
 
 #### End Calc Timer
