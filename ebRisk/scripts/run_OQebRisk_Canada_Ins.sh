@@ -8,7 +8,7 @@ echo "Script for running ebRisk calculations in OpenQuake, using Canadian data, 
 You need to have created the ini files already. Originally written by TE Hobbs on 3 Aug 2021, updated summer 2026. 
 
 
-USAGE: bash ../../../../CanadaSRM-code/ebRisk/scripts/run_OQebRisk_Canada_Ins2Per.sh
+USAGE: bash ../../../../CanadaSRM-code/ebRisk/scripts/run_OQebRisk_Canada_Ins.sh
     to be run from the CanadaSRM-output/probabilistic/current/ebRisk/ folder. Runs only b0.
 
 "
@@ -19,28 +19,34 @@ USAGE: bash ../../../../CanadaSRM-code/ebRisk/scripts/run_OQebRisk_Canada_Ins2Pe
 # ============================================================
 
 ### USER: DEFINE CALCULATIONS AND FOLDERS
-oqIndir="/Users/thobbs/Documents/GitHub/canada-srm2/ebRisk/input" 
-oqOutdir="/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/oq-out"
-iniFileName="ebRisk_b0_Canada_tinyInsuranceTest.ini" #"ebRisk_b0_Canada_Long_Expo2025_TestSmall.ini"
-quants="False" #if True assumes quantiles of 0.05, 0.5, 0.95
-insScript="/Users/thobbs/Documents/CanadaSRM-code/ebRisk/scripts/insuredProbLoss.py"
-oqdataDir="/Users/thobbs/oqdata"
+#oqIndir="/Users/thobbs/Documents/GitHub/canada-srm2/ebRisk/input" 
+#oqOutdir="/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/oq-out"
+#iniFileName="ebRisk_b0_Canada_tinyInsuranceTest.ini" #"ebRisk_b0_Canada_Long_Expo2025_TestSmall.ini"
+#insScript="/Users/thobbs/Documents/CanadaSRM-code/ebRisk/scripts/insuredProbLoss.py"
+#oqdataDir="/Users/thobbs/oqdata"
+#quants="False" #if True assumes quantiles of 0.05, 0.5, 0.95
+#COMPUTE_RESOURCE="THlaptop"
+
+iniFileName="ebRisk_b0_Canada_5yr_Expo2025.ini"
 
 oqIndir="/work/CanadaSRM-code/ebRisk/input"
 oqOutdir="/work/CanadaSRM-output/probabilistic/current/ebRisk/oq-out"
-iniFileName="ebRisk_b0_Canada_Long_Expo2025.ini"
-quants="False"
-insScript="/work/CanadaSRM-code/ebRisk/scripts/insuredProbLoss.py"
+scriptDir="/work/CanadaSRM-code/ebRisk/scripts"
+insScript="${scriptDir}/insuredProbLoss.py"
+aggScript="${scriptDir}/aggInsProbLoss.py"
 oqdataDir="/home/ssm-user/oqdata"
-
+parqDir="/scratch/parquet-out/current"
+quants="False" #if True assumes quantiles of 0.05, 0.5, 0.95
 COMPUTE_RESOURCE="AWS" #THlaptop
 
 ### INITIALIZE PARAMS, FOLDERS
 region="Canada"
 calc="b0"; calcnum="-1"
 mkdir -p ${oqOutdir}/temp; rm -f ${oqOutdir}/temp/*
-prov=$region
-mkdir -p ${oqOutdir}/${prov}
+prov=$region; mkdir -p ${oqOutdir}/${prov}
+parqBackDir="${parqDir%current}backup-$(date +"%Y-%m-%d_%H%M")/"
+mkdir -p $parqBackDir; mv -r ${parqDir}/*.parquet $parqBackDir #backup any existing parquet files
+#If you're confused, use time stamps to figure out when the parqs must've been made
 
 ### SETUP AWS KILL
 set -E
@@ -107,7 +113,9 @@ echo " Starting custom Parquet processing"
 echo "============================================================"
 
 ### RUN INS/2PER MODULE
-python ${insScript} $CALC_ID ${oqIndir}/${iniFileName} $COMPUTE_RESOURCE &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log;
+python ${insScript} $CALC_ID ${oqIndir}/${iniFileName} &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log;
+
+python $aggScript $CALC_ID ${oqIndir}/${iniFileName}
 
 echo "Python processing completed successfully."
 

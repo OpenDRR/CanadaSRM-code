@@ -23,13 +23,12 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
     losses = table.to_table().to_pandas()
     
     losses = losses[losses['event_id'].isin(lbe['event_id'].values)] #drop events that arent in oq event loss table
-    losses = losses[losses['loss'] >= 5000] #drop losses less than 5000 (min asset loss)
     losses.drop(losses[losses.loss_type == 'occupants'].index, inplace=True) #remove occupants losses if they exist
     losses = losses.groupby(["event_id", "aid"])["loss"].sum().reset_index() #merge loss types to get total loss in "loss" column
     
     
     #### Initialize results dataframe
-    ResTable = pd.DataFrame(columns=['eid', 'eff_year', 'RP_EQ-effyear', 'mag', 'occ_rate', 'ss_region', 'LOB', "GU_EQOnly_loss", "GU_LQOnly_loss", 'GU_EQLQ_loss', 'ins_EQLQ_loss', 'PH_EQLQ_loss', 'UI_EQLQ_loss']) #event, return period of loss, magnitude, occurrence rate of that rupture, region, line of business, ground up lossese [EQ only, LQ only, higher of EQ/LQ], claimed loss paid by insurer, policy-holder (deductible) loss, and uninsured loss.
+    ResTable = pd.DataFrame(columns=['eid', 'year', 'RP_EQ-year', 'mag', 'occ_rate', 'ss_region', 'LOB', "GU_EQOnly_loss", "GU_LQOnly_loss", 'GU_EQLQ_loss', 'ins_EQLQ_loss', 'PH_EQLQ_loss', 'UI_EQLQ_loss']) #event, return period of loss, magnitude, occurrence rate of that rupture, region, line of business, ground up lossese [EQ only, LQ only, higher of EQ/LQ], claimed loss paid by insurer, policy-holder (deductible) loss, and uninsured loss.
     
     
     #### Calc insured losses for each event
@@ -38,8 +37,8 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
     for eid in losses['event_id'].unique():
         print('debug: working on eid: '+str(eid))
         as_loss_by_event = losses[losses['event_id'] == eid].copy()
-        eff_year = events[events['id'] == eid]['eff_year'].values[0]
-        RP = events[events['id'] == eid]['RP-effyear'].values[0]
+        year = events[events['id'] == eid]['year'].values[0]
+        RP = events[events['id'] == eid]['RP-year'].values[0]
         mag = events[events['id'] == eid]['mag'].values[0] 
         occ_rate = events[events['id'] == eid]['occurrence_rate'].values[0]
         PLA = events[events['id'] == eid]['PLA'].values[0]
@@ -57,7 +56,7 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
         
         for region in as_loss_by_event['ss_region'].unique():
             # split by ss_region
-            losreg = as_loss_by_event[as_loss_by_event['ss_region'] == region]
+            losreg = as_loss_by_event[as_loss_by_event['ss_region'] == region].copy()
             losreg['totalVal'] = losreg['structural']+losreg['nonstructural']+losreg['contents']
             
             losreg['LQloss'] = 0.0 # Add liq info, only for events with mag above liq thresh
@@ -119,18 +118,25 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                         claim_tot = 0; deduc_tot = 0; unins_tot = GU_EQLQ_loss
                     else:
                         [claim_tot, deduc_tot, unins_tot] = inscalc(data,TYPE) #run insurance calculation
-                    ResTable.loc[len(ResTable)] = [eid, eff_year, RP, mag, occ_rate, region, TYPE, GU_EQOnly_loss, GU_LQOnly_loss, GU_EQLQ_loss, claim_tot, deduc_tot, unins_tot] # add info to result table
+                    ResTable.loc[len(ResTable)] = [eid, year, RP, mag, occ_rate, region, TYPE, GU_EQOnly_loss, GU_LQOnly_loss, GU_EQLQ_loss, claim_tot, deduc_tot, unins_tot] # add info to result table
+                    
+                    del data; gc.collect()
+                    
+            del RES; del COM; del PUB; gc.collect()
+            
+        del losreg; gc.collect()
     
     
     #### Sum insured loss by LOB for total event loss, add auto loss and sum shake total
-    summary = ResTable.groupby(["eid", "eff_year", "RP_EQ-effyear", 'mag', 'occ_rate', "ss_region"])[["GU_EQOnly_loss", "GU_LQOnly_loss", "GU_EQLQ_loss","ins_EQLQ_loss","PH_EQLQ_loss","UI_EQLQ_loss"]].sum().reset_index()
+    summary = ResTable.groupby(["eid", "year", "RP_EQ-year", 'mag', 'occ_rate', "ss_region"])[["GU_EQOnly_loss", "GU_LQOnly_loss", "GU_EQLQ_loss","ins_EQLQ_loss","PH_EQLQ_loss","UI_EQLQ_loss"]].sum().reset_index()
     summary['auto_EQLQ_loss'] = (0.004*summary['GU_EQLQ_loss'])/0.996 #auto is 0.04% per PACICC - I'm making it a % of GU not ins only
     summary['EQLQTotal'] = summary['ins_EQLQ_loss']+summary['PH_EQLQ_loss']+summary['UI_EQLQ_loss']+summary['auto_EQLQ_loss']
     
     
     #### Add FFE Loss
-    summary['FFE_factor'] = np.interp(summary['RP_EQ-effyear'], ffe_lookup['RP'], ffe_lookup['FFE'])
+    summary['FFE_factor'] = np.interp(summary['RP_EQ-year'], ffe_lookup['RP'], ffe_lookup['FFE'])
     summary['FFE_loss'] = ((summary['EQLQTotal'])/(1-summary['FFE_factor']))-summary['EQLQTotal']
+    summary = summary.drop(columns='FFE_factor')
     
     
     #### Add Tsunami Loss
@@ -154,9 +160,9 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
     
     #### Save Results
     print('Saving results for ${CALC_ID} ${parquetFileName}')
-    print(ResTable)
-    ResTable.to_csv(str(outdir)+'/Shake_by_LOB_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv')
-    summary.to_csv(str(outdir)+'/Summary_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv')
+    #print(ResTable)
+    ResTable.to_csv(str(outdir)+'/Shake_by_LOB_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv', index=False)
+    summary.to_csv(str(outdir)+'/Summary_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv', index=False)
     
     print("Finished processing file: " + filePath)
     
@@ -187,8 +193,10 @@ def main() -> int:
     ######################################################################
     #CALC_ID = 322 #ebRisk calculation
     #INI_FILENAME = "/Users/thobbs/Documents/GitHub/canada-srm2/ebRisk/input/ebRisk_b0_Canada_tinyInsuranceTest.ini"
-    CALC_ID=34
-    INI_FILENAME = "/work/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_500kyr_Expo2025.ini"
+    #CALC_ID=34
+    #INI_FILENAME = "/work/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_500kyr_Expo2025.ini"
+    CALC_ID = int(sys.argv[1])
+    INI_FILENAME = sys.argv[2]
     COMPUTE_RESOURCE="AWS" #"THlaptop" #"AWS"
     
     # Local file locations
@@ -199,7 +207,7 @@ def main() -> int:
         outdir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out' #for result tables
         insParamFile="/Users/thobbs/Documents/CanadaSRM-code/ebRisk/scripts/InsParamsByFSA.csv"
     elif COMPUTE_RESOURCE == "AWS":
-        PARQUET_DIR = "/scratch/parquet-out-alt"
+        PARQUET_DIR = "/scratch/parquet-out/current"
         expofile = "/work/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.csv"
         surfgeolfile = "/work/CanadaSRM-input/current/geotech/gsc_surficial_geology.gdb"
         outdir = "/work/CanadaSRM-output/probabilistic/current/ebRisk/ins-out"
@@ -296,15 +304,14 @@ def main() -> int:
     del rups; del sources; gc.collect()
 
 
-    #### Find RP and PLA for each effective year, assign to events
+    #### Find RP and PLA for each year, assign to events
     # based on https://docs.openquake.org/oq-engine/manual/latest/user-guide/outputs/event-based-risk-outputs.html#:~:text=computes%20the%20Probably,eff_time%20is%20respected. and https://github.com/gem/oq-engine/issues/9633
-    events['eff_year'] = events['year']*events['ses_id']
     events = events.merge(lbe, how = "left", left_on = "id", right_on = "event_id").fillna(0).drop(columns="event_id")
-    effyear = events.groupby('eff_year')['loss'].sum().sort_values(ascending=False).reset_index()
-    effyear['RP-effyear'] = eff_time/((effyear.index)+1)
-    effyear['PLA'] = np.interp(effyear['RP-effyear'], pla_lookup['RP'], pla_lookup['PLA'], left=1.0, right=pla_lookup['PLA'].iloc[-1])
-    # Add by event_id but call it 'RP-effyear' 
-    events = events.merge(effyear[['eff_year','RP-effyear','PLA']], on='eff_year', how='left')
+    events_by_year = events.groupby('year')['loss'].sum().sort_values(ascending=False).reset_index()
+    events_by_year['RP-year'] = eff_time/((events_by_year.index)+1)
+    events_by_year['PLA'] = np.interp(events_by_year['RP-year'], pla_lookup['RP'], pla_lookup['PLA'], left=1.0, right=pla_lookup['PLA'].iloc[-1])
+    # Add by event_id but call it 'RP-year' 
+    events = events.merge(events_by_year[['year','RP-year','PLA']], on='year', how='left')
     
     
     #### Assign asset_id from aid

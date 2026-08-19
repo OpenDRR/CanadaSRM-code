@@ -6,11 +6,14 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import FuncFormatter, LogLocator
+import sys
 
 #### Configuration - USER SPECIFIED
-CALC_ID = 34
-INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_500kyr_Expo2025.ini"
-insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
+#CALC_ID = 34
+#INI_FILENAME = "/work/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_500kyr_Expo2025.ini"
+CALC_ID = int(sys.argv[1])
+INI_FILENAME = sys.argv[2]
+insoutDir = '/work/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
 loss_thresh = 1e6 #don't keep annual losses lower than this in loss_by_year outputs
 # could rewrite above param so it keeps any line with ins or unins total loss >.
 
@@ -28,7 +31,6 @@ def get_RP(data, eff_time, loss_type):
         loss_by_year = loss_by_year.merge(ranked[['year','RP-year-'+str(l)]], how='left', on='year')
     
     loss_by_year = loss_by_year[loss_by_year[loss_type].gt(loss_thresh).any(axis=1)]
-    #loss_by_year = loss_by_year[loss_by_year[str(loss_type)] > loss_thresh]
     return loss_by_year
 
 
@@ -68,8 +70,7 @@ def plot_EP(regions, loss_type, loss_thresh):
 
 #### Read csvs
 events = pd.read_csv(str(insoutDir)+'/events_for_'+str(CALC_ID)+'.csv')
-df = pd.concat([pd.read_csv(f) for f in glob.glob(str(insoutDir) + '/Summary_' + str(CALC_ID) + '_2026-08-1*.csv')], ignore_index=True)
-#################### HARD-CODED FOR RECENT RUNS - GENERALIZE?
+df = pd.concat([pd.read_csv(f) for f in glob.glob(str(insoutDir) + '/Summary_' + str(CALC_ID) + '_*.csv')], ignore_index=True)
 
 
 #### Add 'year' back, get rid of 'eff_year'
