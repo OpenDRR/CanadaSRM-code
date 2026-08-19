@@ -66,7 +66,7 @@ echo "============================================================"
 ### STANDARD OQ EXPORTS and GET CALC ID
 oq export avg_losses-stats -1 -e csv -d ${outDir}/temp
 CALC_ID=$(ls -t ${outDir}/temp/avg_losses* | head -1 | awk -F'[_.]' '{print $(NF-1)}')
-cp ${outDir}/temp/avg_losses-mean_${CALC_ID}.csv ${oqOutdir}/avg_losses-mean_${basename}.csv
+cp ${outDir}/temp/avg_losses-mean_${CALC_ID}.csv ${oqOutdir}/avg_losses-mean_${CALC_ID}_${basename}.csv
 
 
 ### COPY oq_data to EBS
