@@ -39,18 +39,17 @@ import glob
 import pandas as pd
 import numpy as np
 import pyarrow.dataset as ds
-#from openquake.commonlib import datastore
 from openquake.commonlib.datastore import read
 import random
 import geopandas as gpd
 import warnings
-import time
 import os
 import sys
 import re
-import psutil
 import gc
-import matplotlib.pyplot as plt
+
+import psutil
+import time
 
 
 #### Calculation Timer
@@ -87,11 +86,7 @@ elif COMPUTE_RESOURCE == "AWS":
     outdir = "/work/CanadaSRM-output/probabilistic/current/ebRisk/ins-out"
     insParamFile="/work/CanadaSRM-code/ebRisk/scripts/InsParamsByFSA.csv"
 
-# Temporary insurance params: penetration rate, deductible, policy limit
-#insdic_w_res = {'p': 0.55, 'd': 0.125, 'l': 1.11} #1.883}
-#insdic_w_com = {'p': 0.85, 'd': 0.1, 'l': 1.04} #1.883} 
-#insdic_e_res = {'p': 0.02, 'd': 0.05, 'l': 1.11} #1.818}
-#insdic_e_com = {'p': 0.60, 'd': 0.05, 'l': 1.04} #1.818}
+# insurance params: penetration rate, deductible, policy limit
 ins_params = pd.read_csv(insParamFile)
 RESparams = ins_params[ins_params['LoB'] == 'P']
 COMparams = ins_params[ins_params['LoB'] == 'C']
@@ -200,14 +195,8 @@ Wprovs = [59, 48, 61, 47, 60] #BC, AB, SK, YT, NT in no order
 #### Load loss_by_event table from OQ, for post loss amplification (PLA)
 dstore = read(CALC_ID)
 loss_by_event = dstore.read_df('risk_by_event')
-lbe = loss_by_event[['event_id','loss']].groupby(['event_id']).sum()
+lbe = loss_by_event[['event_id','loss']].groupby(['event_id'], as_index=False).sum()
 del loss_by_event; gc.collect() #clear up memory by deleting df
-
-#### Find PLA for each event id
-# based on https://docs.openquake.org/oq-engine/manual/latest/user-guide/outputs/event-based-risk-outputs.html#:~:text=computes%20the%20Probably,eff_time%20is%20respected. and https://github.com/gem/oq-engine/issues/9633
-lbe = lbe.sort_values('loss', ascending=False).reset_index()
-lbe['RP'] = eff_time/((lbe.index)+1)
-lbe['PLA'] = np.interp(lbe['RP'], pla_lookup['RP'], pla_lookup['PLA'], left=1.0, right=pla_lookup['PLA'].iloc[-1])
 
 
 #### Get source model information for each event
@@ -218,6 +207,17 @@ events = events.merge(rups[['id', 'source_id', 'mag', 'occurrence_rate']], left_
 events['source_name'] = sources.iloc[events["source_id"]].reset_index(drop=True)['source_id'] #grab source name from sources df, based on rupture id
 events['source_name'] = events['source_name'].str.decode("utf-8")
 del rups; del sources; gc.collect()
+
+
+#### Find RP and PLA for each effective year, assign to events
+# based on https://docs.openquake.org/oq-engine/manual/latest/user-guide/outputs/event-based-risk-outputs.html#:~:text=computes%20the%20Probably,eff_time%20is%20respected. and https://github.com/gem/oq-engine/issues/9633
+events['eff_year'] = events['year']*events['ses_id']
+events = events.merge(lbe, how = "left", left_on = "id", right_on = "event_id").fillna(0).drop(columns="event_id")
+effyear = events.groupby('eff_year')['loss'].sum().sort_values(ascending=False).reset_index()
+effyear['RP-effyear'] = eff_time/((effyear.index)+1)
+effyear['PLA'] = np.interp(effyear['RP-effyear'], pla_lookup['RP'], pla_lookup['PLA'], left=1.0, right=pla_lookup['PLA'].iloc[-1])
+# Add by event_id but call it 'RP-effyear' 
+events = events.merge(effyear[['eff_year','RP-effyear','PLA']], on='eff_year', how='left')
 
 
 #### Assign asset_id from aid
@@ -248,13 +248,7 @@ for i in range(0, len(files), batch_size):
     
     
     #### Initialize results dataframe
-    ResTable = pd.DataFrame(columns=['eid', 'RP_GU_EQ', 'mag', 'occ_rate', 'ss_region', 'LOB', "GU_EQOnly_loss", "GU_LQOnly_loss", 'GU_EQLQ_loss', 'ins_EQLQ_loss', 'PH_EQLQ_loss', 'UI_EQLQ_loss']) #event, return period of loss, magnitude, occurrence rate of that rupture, region, line of business, ground up lossese [EQ only, LQ only, higher of EQ/LQ], claimed loss paid by insurer, policy-holder (deductible) loss, and uninsured loss.
-    
-    
-    #### Merge loss info with supporting metadata
-    losses = losses.merge(lbe[['event_id', 'PLA', 'RP']], how='left', on='event_id') #merge with loss by event table
-    losses['loss_pla'] = losses['loss']*losses['PLA'] #get loss with amplification
-    losses = losses.merge(events[['id','mag','occurrence_rate','source_name']], how='left', left_on='event_id', right_on='id'); losses = losses.drop(columns = 'id') #add source info 
+    ResTable = pd.DataFrame(columns=['eid', 'eff_year', 'RP_EQ-effyear', 'mag', 'occ_rate', 'ss_region', 'LOB', "GU_EQOnly_loss", "GU_LQOnly_loss", 'GU_EQLQ_loss', 'ins_EQLQ_loss', 'PH_EQLQ_loss', 'UI_EQLQ_loss']) #event, return period of loss, magnitude, occurrence rate of that rupture, region, line of business, ground up lossese [EQ only, LQ only, higher of EQ/LQ], claimed loss paid by insurer, policy-holder (deductible) loss, and uninsured loss.
     
     
     #### Calc insured losses for each event
@@ -263,7 +257,12 @@ for i in range(0, len(files), batch_size):
     for eid in losses['event_id'].unique():
         print('debug: working on eid: '+str(eid))
         as_loss_by_event = losses[losses['event_id'] == eid]
-        RP = as_loss_by_event['RP'].iloc[0]; mag = as_loss_by_event['mag'].iloc[0]; occ_rate = as_loss_by_event['occurrence_rate'].iloc[0]
+        eff_year = events[events['id'] == eid]['eff_year'].values[0]
+        RP = events[events['id'] == eid]['RP-effyear'].values[0]
+        mag = events[events['id'] == eid]['mag'].values[0] 
+        occ_rate = events[events['id'] == eid]['occurrence_rate'].values[0]
+        PLA = events[events['id'] == eid]['PLA'].values[0]
+        as_loss_by_event['loss_pla'] = as_loss_by_event['loss']*PLA #get loss with amplification
         as_loss_by_event = as_loss_by_event.merge(lookup,left_on="aid",right_on="ordinal",how="left") #add asset_id and ss_region to event losses
         missing = as_loss_by_event["asset_id"].isna().sum()
         if missing:
@@ -296,6 +295,9 @@ for i in range(0, len(files), batch_size):
                 # Calc the liq impact and propagate (careful not to conflate with shake loss)
                 # Giving buildings in 'High' or 'Very High' LQ susc to have 4% chance of complete loss and 9% chance of 50% loss
                 # May be small numbers so using probability per asset instead of total number of bldgs
+                
+                ####### DO THIS AS MATRIX NOT LOOP?!!?
+                
                 LQ_bldgs = losreg[losreg['liq_class'].isin(['High','Very High'])] 
                 for [ind, row] in LQ_bldgs.sample(frac=1).iterrows():
                     rando_val = random.random()
@@ -336,20 +338,17 @@ for i in range(0, len(files), batch_size):
                         claim_tot = 0; deduc_tot = 0; unins_tot = GU_EQLQ_loss
                     else:
                         [claim_tot, deduc_tot, unins_tot] = inscalc(data,TYPE) #run insurance calculation
-                        ############ In theory could run this multiple times and take the average
-                    ResTable.loc[len(ResTable)] = [eid, RP, mag, occ_rate, region, TYPE, GU_EQOnly_loss, GU_LQOnly_loss, GU_EQLQ_loss, claim_tot, deduc_tot, unins_tot] # add info to result table
+                    ResTable.loc[len(ResTable)] = [eid, eff_year, RP, mag, occ_rate, region, TYPE, GU_EQOnly_loss, GU_LQOnly_loss, GU_EQLQ_loss, claim_tot, deduc_tot, unins_tot] # add info to result table
 
 
     #### Sum insured loss by LOB for total event loss, add auto loss and sum shake total
-    summary = ResTable.groupby(["eid", "RP_GU_EQ", 'mag', 'occ_rate', "ss_region"])[["GU_EQOnly_loss", "GU_LQOnly_loss", "GU_EQLQ_loss","ins_EQLQ_loss","PH_EQLQ_loss","UI_EQLQ_loss"]].sum().reset_index()
+    summary = ResTable.groupby(["eid", "eff_year", "RP_EQ-effyear", 'mag', 'occ_rate', "ss_region"])[["GU_EQOnly_loss", "GU_LQOnly_loss", "GU_EQLQ_loss","ins_EQLQ_loss","PH_EQLQ_loss","UI_EQLQ_loss"]].sum().reset_index()
     summary['auto_EQLQ_loss'] = (0.004*summary['GU_EQLQ_loss'])/0.996 #auto is 0.04% per PACICC - I'm making it a % of GU not ins only
     summary['EQLQTotal'] = summary['ins_EQLQ_loss']+summary['PH_EQLQ_loss']+summary['UI_EQLQ_loss']+summary['auto_EQLQ_loss']
 
 
-
-
     #### Add FFE Loss
-    summary['FFE_factor'] = np.interp(summary['RP_GU_EQ'], ffe_lookup['RP'], ffe_lookup['FFE'])
+    summary['FFE_factor'] = np.interp(summary['RP_EQ-effyear'], ffe_lookup['RP'], ffe_lookup['FFE'])
     summary['FFE_loss'] = ((summary['EQLQTotal'])/(1-summary['FFE_factor']))-summary['EQLQTotal']
 
 
@@ -368,28 +367,13 @@ for i in range(0, len(files), batch_size):
 
     #### Calculate total cost to the insurance sector
     summary['TotCostToIns'] = summary['ins_tsunami']+summary['ins_EQLQ_loss']+summary['auto_EQLQ_loss']+summary['FFE_loss']
-    # get the RP of the insured loss
-    ilbe = summary[['eid','TotCostToIns']].sort_values('TotCostToIns', ascending=False).reset_index()
-    ilbe['RP_Ins'] = eff_time/((ilbe.index)+1)
-    summary = summary.merge(ilbe[['eid','RP_Ins']], how='left', on='eid')
-
-
+    
+    
     #### Save Results
     ResTable.to_csv(outdir+'/Shake_by_LOB_'+str(CALC_ID)+'_'+str(parqNum)+'.csv')
     summary.to_csv(outdir+'/Summary_'+str(CALC_ID)+'_'+str(parqNum)+'.csv')
 
     del losses; del batch_dataset; del summary; del ResTable; del RES; del COM; del PUB; del data; del as_loss_by_event; del losreg
-
-##### Plot EP Curve - NATIONAL, EAST, WEST - WORKING HERE.
-#plt.figure(figsize=(5, 5))
-#plt.scatter(summary['RP_Ins'], summary['TotCostToIns'])
-## make this a log plot, color by GU loss to show that they're totally unrelated. 
-## add axis labels
-#plt.title('Insured Loss EP Curve')
-#plt.savefig(outdir+'/SummaryEP_'+str(CALC_ID)+'.png')
-
-
-#### Aggregate all csvs
 
 
 
