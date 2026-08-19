@@ -15,9 +15,9 @@ import re
 import gc
 
 # This is start of concurrency
-def processFile(filePath, CALC_ID, lbe, events, lookup, expo, mag_LQ_thresh, surficial, RESparams, COMparams, ffe_lookup, outdir):
+def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, mag_LQ_thresh, surficial, LQ_rate, RESparams, COMparams, ffe_lookup, outdir):
     print("Started processing file: " + filePath)
-
+    
     # load the parquet file
     table = ds.dataset(filePath, format="parquet")
     losses = table.to_table().to_pandas()
@@ -48,7 +48,7 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, mag_LQ_thresh, sur
         missing = as_loss_by_event["asset_id"].isna().sum()
         if missing:
             raise RuntimeError(f"{missing} aids could not be matched") 
-        
+            
         # merge with expo
         as_loss_by_event = as_loss_by_event.merge(expo[['id','structural','nonstructural','contents','number','lon','lat','OccClass','pruid', 'fsauid']], left_on="asset_id", right_on="id", how="left"); as_loss_by_event = as_loss_by_event.drop(columns='id') #add expo
         
@@ -120,19 +120,19 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, mag_LQ_thresh, sur
                     else:
                         [claim_tot, deduc_tot, unins_tot] = inscalc(data,TYPE) #run insurance calculation
                     ResTable.loc[len(ResTable)] = [eid, eff_year, RP, mag, occ_rate, region, TYPE, GU_EQOnly_loss, GU_LQOnly_loss, GU_EQLQ_loss, claim_tot, deduc_tot, unins_tot] # add info to result table
-
-
+    
+    
     #### Sum insured loss by LOB for total event loss, add auto loss and sum shake total
     summary = ResTable.groupby(["eid", "eff_year", "RP_EQ-effyear", 'mag', 'occ_rate', "ss_region"])[["GU_EQOnly_loss", "GU_LQOnly_loss", "GU_EQLQ_loss","ins_EQLQ_loss","PH_EQLQ_loss","UI_EQLQ_loss"]].sum().reset_index()
     summary['auto_EQLQ_loss'] = (0.004*summary['GU_EQLQ_loss'])/0.996 #auto is 0.04% per PACICC - I'm making it a % of GU not ins only
     summary['EQLQTotal'] = summary['ins_EQLQ_loss']+summary['PH_EQLQ_loss']+summary['UI_EQLQ_loss']+summary['auto_EQLQ_loss']
-
-
+    
+    
     #### Add FFE Loss
     summary['FFE_factor'] = np.interp(summary['RP_EQ-effyear'], ffe_lookup['RP'], ffe_lookup['FFE'])
     summary['FFE_loss'] = ((summary['EQLQTotal'])/(1-summary['FFE_factor']))-summary['EQLQTotal']
-
-
+    
+    
     #### Add Tsunami Loss
     # based on AIR, for CASCADIA INTERFACE only: it represents (4273/49972) of total losses (including ALE/BI) and (1117/17078) of insured losses (seems to have already subtracted deductible, so only applying to "ins").
     # Isolate CSZ events
@@ -144,8 +144,8 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, mag_LQ_thresh, sur
             for ind_val in summary[summary['eid'] == eid].index.values:
                 summary.at[ind_val, 'tot_tsunami'] = summary.iloc[ind_val]['EQLQTotal']*(4273/49972)
                 summary.at[ind_val, 'ins_tsunami'] = summary.iloc[ind_val]['ins_EQLQ_loss']*(1117/17078)
-
-
+    
+    
     #### Calculate total cost to the insurance sector
     summary['TotCostToIns'] = summary['ins_tsunami']+summary['ins_EQLQ_loss']+summary['auto_EQLQ_loss']+summary['FFE_loss']
     
@@ -153,8 +153,10 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, mag_LQ_thresh, sur
     parquetFileName = Path(filePath).name.split('_losses_')[1].split('.parquet')[0]
     
     #### Save Results
-    ResTable.to_csv(outdir+'/Shake_by_LOB_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv')
-    summary.to_csv(outdir+'/Summary_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv')
+    print('Saving results for ${CALC_ID} ${parquetFileName}')
+    print(ResTable)
+    ResTable.to_csv(str(outdir)+'/Shake_by_LOB_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv')
+    summary.to_csv(str(outdir)+'/Summary_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv')
     
     print("Finished processing file: " + filePath)
     
@@ -323,7 +325,7 @@ def main() -> int:
 
     with Pool(processes=numProcs) as pool:
         for parquetFile in parquetFiles:
-            pool.apply_async(processFile, (parquetFile, CALC_ID, lbe, events, lookup, expo, mag_LQ_thresh, surficial, RESparams, COMparams, ffe_lookup, outdir)) #processFile is function, second argument to apply_async is an array of arguments to pass to the function. 
+            pool.apply_async(processFile, (parquetFile, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, mag_LQ_thresh, surficial, LQ_rate, RESparams, COMparams, ffe_lookup, outdir)) #processFile is function, second argument to apply_async is an array of arguments to pass to the function. 
 
         pool.close()
         pool.join()
