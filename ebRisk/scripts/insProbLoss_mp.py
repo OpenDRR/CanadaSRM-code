@@ -15,7 +15,7 @@ import re
 import gc
 
 # This is start of concurrency
-def processFile(filePath, lbe, events, lookup, expo, mag_LQ_thresh, surficial, RESparams, COMparams, ffe_lookup, outdir):
+def processFile(filePath, CALC_ID, lbe, events, lookup, expo, mag_LQ_thresh, surficial, RESparams, COMparams, ffe_lookup, outdir):
     print("Started processing file: " + filePath)
 
     # load the parquet file
@@ -37,7 +37,7 @@ def processFile(filePath, lbe, events, lookup, expo, mag_LQ_thresh, surficial, R
     # isolate each event
     for eid in losses['event_id'].unique():
         print('debug: working on eid: '+str(eid))
-        as_loss_by_event = losses[losses['event_id'] == eid]
+        as_loss_by_event = losses[losses['event_id'] == eid].copy()
         eff_year = events[events['id'] == eid]['eff_year'].values[0]
         RP = events[events['id'] == eid]['RP-effyear'].values[0]
         mag = events[events['id'] == eid]['mag'].values[0] 
@@ -183,9 +183,11 @@ def main() -> int:
     #CONFIG & FILEPATHS
     # Can also call functions here
     ######################################################################
-    CALC_ID = 322 #ebRisk calculation
-    INI_FILENAME = "/Users/thobbs/Documents/GitHub/canada-srm2/ebRisk/input/ebRisk_b0_Canada_tinyInsuranceTest.ini"
-    COMPUTE_RESOURCE="THlaptop" #"AWS"
+    #CALC_ID = 322 #ebRisk calculation
+    #INI_FILENAME = "/Users/thobbs/Documents/GitHub/canada-srm2/ebRisk/input/ebRisk_b0_Canada_tinyInsuranceTest.ini"
+    CALC_ID=34
+    INI_FILENAME = "/work/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_500kyr_Expo2025.ini"
+    COMPUTE_RESOURCE="AWS" #"THlaptop" #"AWS"
     
     # Local file locations
     if COMPUTE_RESOURCE == "THlaptop":
@@ -195,7 +197,7 @@ def main() -> int:
         outdir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out' #for result tables
         insParamFile="/Users/thobbs/Documents/CanadaSRM-code/ebRisk/scripts/InsParamsByFSA.csv"
     elif COMPUTE_RESOURCE == "AWS":
-        PARQUET_DIR = "/scratch/parquet-out"
+        PARQUET_DIR = "/scratch/parquet-out-alt"
         expofile = "/work/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.csv"
         surfgeolfile = "/work/CanadaSRM-input/current/geotech/gsc_surficial_geology.gdb"
         outdir = "/work/CanadaSRM-output/probabilistic/current/ebRisk/ins-out"
@@ -321,7 +323,7 @@ def main() -> int:
 
     with Pool(processes=numProcs) as pool:
         for parquetFile in parquetFiles:
-            pool.apply_async(processFile, (parquetFile, lbe, events, lookup, expo, mag_LQ_thresh, surficial, RESparams, COMparams, ffe_lookup, outdir)) #processFile is function, second argument to apply_async is an array of arguments to pass to the function. 
+            pool.apply_async(processFile, (parquetFile, CALC_ID, lbe, events, lookup, expo, mag_LQ_thresh, surficial, RESparams, COMparams, ffe_lookup, outdir)) #processFile is function, second argument to apply_async is an array of arguments to pass to the function. 
 
         pool.close()
         pool.join()
