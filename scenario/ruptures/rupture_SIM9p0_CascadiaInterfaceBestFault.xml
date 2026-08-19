@@ -3,7 +3,7 @@
       xmlns="http://openquake.org/xmlns/nrml/0.4">
     
     <complexFaultRupture>
-        <magnitude>9.1</magnitude>
+        <magnitude>9.0</magnitude>
         <rake>90.0</rake>
         <hypocenter lat="48.25" lon="-125.217" depth="15.0"/>
         <complexFaultGeometry>
