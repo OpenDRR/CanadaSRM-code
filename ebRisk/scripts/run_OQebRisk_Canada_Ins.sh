@@ -66,7 +66,7 @@ echo "============================================================"
 
 ### RUN RISK CALCS
 # could implement 'oq engine --run FILE --hc RUNNUM if useful
-oq engine --run ${oqIndir}/${iniFileName} &> ${oqOutdir}/${prov}/ebR_${region}_oqlog.log
+oq engine --run ${oqIndir}/${iniFileName} #&> ${oqOutdir}/${prov}/ebR_${region}_oqlog.log
 
 
 echo "OpenQuake completed successfully."
@@ -114,7 +114,7 @@ echo " Starting custom Parquet processing"
 echo "============================================================"
 
 ### RUN INS/2PER MODULE
-python ${insScript} $CALC_ID ${oqIndir}/${iniFileName} &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log
+python ${insScript} $CALC_ID ${oqIndir}/${iniFileName} #&> ${oqOutdir}/${prov}/ebR_${region}_inslog.log
 
 python $aggScript $CALC_ID ${oqIndir}/${iniFileName}
 
