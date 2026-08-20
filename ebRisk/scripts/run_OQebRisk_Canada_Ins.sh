@@ -45,18 +45,19 @@ calc="b0"; calcnum="-1"
 mkdir -p ${oqOutdir}/temp; rm -f ${oqOutdir}/temp/*
 prov=$region; mkdir -p ${oqOutdir}/${prov}
 parqBackDir="${parqDir%current}backup-$(date +"%Y-%m-%d_%H%M")/"
-mkdir -p $parqBackDir; mv -r ${parqDir}/*.parquet $parqBackDir #backup any existing parquet files
+mkdir -p $parqBackDir 
+[ -f "${parqDir}/*.parquet" ] && mv ${parqDir}/*.parquet $parqBackDir #backup any existing parquet files
 #If you're confused, use time stamps to figure out when the parqs must've been made
 
 ### SETUP AWS KILL
-set -E
-
-shut_down_ec2_instance() {
-    echo "Shutting down EC2 instance"
-    sudo shutdown -h now
-    }
-
-trap shut_down_ec2_instance ERR
+#set -E
+#
+#shut_down_ec2_instance() {
+#    echo "Shutting down EC2 instance"
+#    sudo shutdown -h now
+#    }
+#
+#trap shut_down_ec2_instance ERR
 
 
 echo "============================================================"
@@ -122,4 +123,4 @@ echo "Python processing completed successfully."
 
 
 ### AWS KILL
-shut_down_ec2_instance
+#shut_down_ec2_instance

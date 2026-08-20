@@ -312,6 +312,7 @@ def main() -> int:
     events_by_year['PLA'] = np.interp(events_by_year['RP-year'], pla_lookup['RP'], pla_lookup['PLA'], left=1.0, right=pla_lookup['PLA'].iloc[-1])
     # Add by event_id but call it 'RP-year' 
     events = events.merge(events_by_year[['year','RP-year','PLA']], on='year', how='left')
+    events.to_csv(str(outdir)+'/events_for_'+str(CALC_ID)+'.csv')
     
     
     #### Assign asset_id from aid
