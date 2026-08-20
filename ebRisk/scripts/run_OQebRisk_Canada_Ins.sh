@@ -66,7 +66,7 @@ echo "============================================================"
 
 ### RUN RISK CALCS
 # could implement 'oq engine --run FILE --hc RUNNUM if useful
-oq engine --run ${oqIndir}/${iniFileName} &> ${oqOutdir}/${prov}/ebR_${region}_oqlog.log;
+oq engine --run ${oqIndir}/${iniFileName} &> ${oqOutdir}/${prov}/ebR_${region}_oqlog.log
 
 
 echo "OpenQuake completed successfully."
@@ -96,10 +96,10 @@ if [[ "$quants" == "True" ]]; then
     mv ${oqOutdir}/temp/agg_losses-quantile-0.5*.csv ${oqOutdir}/${prov}/ebR_${region}_agg_losses-q50_${calc}.csv;
     mv ${oqOutdir}/temp/agg_losses-quantile-0.95*.csv ${oqOutdir}/${prov}/ebR_${region}_agg_losses-q95_${calc}.csv;
     oq export src_loss_table $calcnum -e csv -d ${oqOutdir}/temp/
-    mv ${oqOutdir}/temp/src_loss_table_*.csv ${oqOutdir}/${prov}/ebR_${region}_src_loss_table_${calc}.csv;
+    mv ${oqOutdir}/temp/src_loss_table_*.csv ${oqOutdir}/${prov}/ebR_${region}_src_loss_table_${calc}.csv
 else
     oq export aggcurves $calcnum -e csv -d ${oqOutdir}/temp/
-    mv ${oqOutdir}/temp/aggcurves-*.csv ${oqOutdir}/${prov}/ebR_${region}_aggcurves-_${calc}.csv;
+    mv ${oqOutdir}/temp/aggcurves-*.csv ${oqOutdir}/${prov}/ebR_${region}_aggcurves-_${calc}.csv
 fi
 
 
@@ -114,7 +114,7 @@ echo " Starting custom Parquet processing"
 echo "============================================================"
 
 ### RUN INS/2PER MODULE
-python ${insScript} $CALC_ID ${oqIndir}/${iniFileName} &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log;
+python ${insScript} $CALC_ID ${oqIndir}/${iniFileName} &> ${oqOutdir}/${prov}/ebR_${region}_inslog.log
 
 python $aggScript $CALC_ID ${oqIndir}/${iniFileName}
 
