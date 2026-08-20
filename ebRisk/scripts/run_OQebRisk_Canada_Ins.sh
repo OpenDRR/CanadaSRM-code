@@ -27,7 +27,7 @@ USAGE: bash ../../../../CanadaSRM-code/ebRisk/scripts/run_OQebRisk_Canada_Ins.sh
 #quants="False" #if True assumes quantiles of 0.05, 0.5, 0.95
 #COMPUTE_RESOURCE="THlaptop"
 
-iniFileName="ebRisk_b0_Canada_5yr_Expo2025.ini"
+iniFileName="ebRisk_b0_Canada_100kyr_Expo2025.ini"
 
 oqIndir="/work/CanadaSRM-code/ebRisk/input"
 oqOutdir="/work/CanadaSRM-output/probabilistic/current/ebRisk/oq-out"
