@@ -78,7 +78,8 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                 
                 ####### DO THIS AS MATRIX NOT LOOP?!!?
                 
-                LQ_bldgs = losreg[losreg['liq_class'].isin(['High','Very High'])] 
+                #LQ_bldgs = losreg[losreg['liq_class'].isin(['High','Very High'])]
+                LQ_bldgs = losreg[losreg['liq_class'].isin(['Very High'])]
                 for [ind, row] in LQ_bldgs.sample(frac=1).iterrows():
                     rando_val = random.random()
                     if rando_val < LQ_rate['p_100']:
@@ -202,7 +203,7 @@ def main() -> int:
     # Local file locations
     if COMPUTE_RESOURCE == "THlaptop":
         PARQUET_DIR = "/Users/thobbs/Documents/GitHub/canada-srm2/Parquets_firstRun/" #Where parquet files were output from ebRisk
-        expofile = '/Users/thobbs/Documents/GitHub/openquake-inputs/exposure/general-building-stock/oqBldgExp_CA.csv'
+        expofile = '/Users/thobbs/Documents/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.csv'
         surfgeolfile = '/Users/thobbs/Documents/gsc_surficial_geology.gdb'
         outdir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out' #for result tables
         insParamFile="/Users/thobbs/Documents/CanadaSRM-code/ebRisk/scripts/InsParamsByFSA.csv"

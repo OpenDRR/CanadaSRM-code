@@ -38,14 +38,14 @@ mkdir -p ${oqOutdir}
 basename=$(echo $iniFileName | awk -F'_' '{print $3"_"$4}')
 
 ### SETUP AWS KILL
-set -E
-
-shut_down_ec2_instance() {
-    echo "Shutting down EC2 instance"
-    sudo shutdown -h now
-    }
-
-trap shut_down_ec2_instance ERR
+#set -E
+#
+#shut_down_ec2_instance() {
+#    echo "Shutting down EC2 instance"
+#    sudo shutdown -h now
+#    }
+#
+#trap shut_down_ec2_instance ERR
 
 
 echo "============================================================"
@@ -80,11 +80,11 @@ echo " Starting custom Parquet processing"
 echo "============================================================"
 
 ### RUN INS/2PER MODULE
-python insScript $CALC_ID ${oqIndir}/${iniFileName} $COMPUTE_RESOURCE
+python $insScript $CALC_ID ${oqIndir}/${iniFileName} $COMPUTE_RESOURCE
 
 echo "Python processing completed successfully."
 
 
 
 ### AWS KILL
-shut_down_ec2_instance
+#shut_down_ec2_instance

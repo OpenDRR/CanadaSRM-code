@@ -60,8 +60,8 @@ start_time = time.perf_counter()
 #### Set run parameters
 if len(sys.argv) < 2:
     print("No arguments were provided - using hard-coded values.")
-    CALC_ID = 28 #ebRisk calculation
-    INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/scenario/input/s_Risk_SIM9p2_CascadiaInterfaceBestFault_b0_b.ini"
+    CALC_ID = 30 #ebRisk calculation
+    INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/scenario/input/s_Risk_SCM7p5_MontrealIapetan_b0_b.ini"
     COMPUTE_RESOURCE="THlaptop"
 elif len(sys.argv) == 4:
     print(f"Arguments provided: {sys.argv[1:]}")
@@ -76,14 +76,14 @@ config = configparser.ConfigParser()
 config.read(INI_FILENAME)
 expofile = config["Exposure model"]["exposure_file"]
 if COMPUTE_RESOURCE == "THlaptop":
-    #expofile = '/Users/thobbs/Documents/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.csv'
+    #expofile = '/Users/thobbs/Documents/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.xml'
     #denseCSDs = '/Users/thobbs/Documents/WRITING/EQInsuranceGaps/popdensCSD.txt'
     surfgeolfile = '/Users/thobbs/Documents/CanadaSRM-input/current/geotech/gsc_surficial_geology.gdb'
     indir = '/Users/thobbs/Documents/CanadaSRM-output/deterministic/current/temp' #raw OQ exports
     outdir = '/Users/thobbs/Documents/CanadaSRM-output/deterministic/current/ins-out' #for result tables
     insParamFile="/Users/thobbs/Documents/CanadaSRM-code/ebRisk/scripts/InsParamsByFSA.csv"
 elif COMPUTE_RESOURCE == "AWS":
-    #expofile = "/work/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.csv"
+    #expofile = "/work/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.xml"
     #denseCSDs = "/work/CanadaSRM-input/current/exposure/popdensCSD.txt"
     surfgeolfile = "/work/CanadaSRM-input/current/geotech/gsc_surficial_geology.gdb"
     indir = '/work/CanadaSRM-output/probabilistic/current/temp'
@@ -101,7 +101,7 @@ COMparams = ins_params[ins_params['LoB'] == 'C']
 
 # Misc secondary peril parameters
 #make_densecsds = False #Set to True if you need to create a list of csd's with pop density over 3000/km2 ('popdensCSD.txt'). Else assume it exists in location specified above. NOT IN USE YET, for FFE.
-LQ_rate = {'p_100': 0.04, 'p_50': 0.09} #probability of having 100% or 50% loss, for bldgs with High/Very High LQ susceptibility
+LQ_rate = {'p_100': 0.04, 'p_50': 0.09} #probability of having (100% or 50%)/(42% or 25%) loss, for bldgs with sufficiently high LQ susceptibility. See notes from Sept 18, 2026. 
 mag_LQ_thresh = 6.5 #minimum magnitude of earthquake to create liquefaction
 
 # Provide APPROXIMATE return periods and source loc for scenarios, for PLA, FFE and TSUNAMI ONLY (below)
@@ -238,13 +238,16 @@ if mag >= mag_LQ_thresh:
     # Calc the liq impact and propagate (careful not to conflate with shake loss)
     # Giving buildings in 'High' or 'Very High' LQ susc to have 4% chance of complete loss and 9% chance of 50% loss
     # May be small numbers so using probability per asset instead of total number of bldgs
-    LQ_bldgs = losreg[losreg['liq_class'].isin(['High','Very High'])] 
+    #LQ_bldgs = losreg[losreg['liq_class'].isin(['High','Very High'])]
+    LQ_bldgs = losreg[losreg['liq_class'].isin(['Very High'])] 
     for [ind, row] in LQ_bldgs.sample(frac=1).iterrows():
         rando_val = random.random()
         if rando_val < LQ_rate['p_100']:
             losreg.at[ind,'LQloss'] = row['totalVal']
+            #losreg.at[ind,'LQloss'] = 0.42*row['totalVal']
         elif rando_val < (LQ_rate['p_100']+LQ_rate['p_50']):
             losreg.at[ind,'LQloss'] = 0.5*row['totalVal']
+            #losreg.at[ind,'LQloss'] = 0.25*row['totalVal']
 
 losreg['max_EQpolicy_loss'] = np.maximum(losreg['LQloss'], losreg['loss_pla'])
 
