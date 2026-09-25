@@ -25,4 +25,4 @@ num_outs = sum(1 for f in Path(path_ins).glob(file_ins) if f.is_file())
 
 #### Return progress
 perc_complete = (num_outs/num_parqs)*100
-print(f"Insurance Calc is {perc_complete:.0f}% done.")
+print(f"Insurance Calc is {perc_complete:.3f}% done.")
