@@ -40,6 +40,10 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
         year = events[events['id'] == eid]['year'].values[0]
         RP = events[events['id'] == eid]['RP-year'].values[0]
         mag = events[events['id'] == eid]['mag'].values[0] 
+        lat = events[events['id'] == eid]['hypo_1'].values[0]
+        lon = events[events['id'] == eid]['hypo_0'].values[0]
+        ref_lat, ref_lon = lat, lon
+        liq_dist = np.where((mag < 7.7), (mag - 6.463)/0.01, 450) #From Papathanassiou et al., 2005 for Aegean up to M7.6, otherwise max value from Tohoku of ~450.
         occ_rate = events[events['id'] == eid]['occurrence_rate'].values[0]
         PLA = events[events['id'] == eid]['PLA'].values[0]
         as_loss_by_event['loss_pla'] = as_loss_by_event['loss']*PLA #get loss with amplification
@@ -60,6 +64,7 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
             losreg['totalVal'] = losreg['structural']+losreg['nonstructural']+losreg['contents']
             
             losreg['LQloss'] = 0.0 # Add liq info, only for events with mag above liq thresh
+            losreg['dist_to_epi'] = haversine_vectorized(losreg, 'lat', 'lon', ref_lat, ref_lon) # Calc distance to epi (for LQ losses)
             if mag >= mag_LQ_thresh:
                 #print('debug: Adding liquefaction')
                 data_gdf = gpd.GeoDataFrame(losreg, geometry=gpd.points_from_xy(losreg["lon"], losreg["lat"]), crs="EPSG:4617") #assuming lat/lon are in WGS84 would be EPSG:4326
@@ -79,15 +84,19 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                 ####### DO THIS AS MATRIX NOT LOOP?!!?
                 
                 #LQ_bldgs = losreg[losreg['liq_class'].isin(['High','Very High'])]
-                LQ_bldgs = losreg[losreg['liq_class'].isin(['Very High'])]
+                #LQ_bldgs = losreg[losreg['liq_class'].isin(['Very High'])]
+                LQ_bldgs = losreg[(losreg['liq_class'].isin(['Very High'])) & (losreg['dist_to_epi'] < liq_dist)]
                 for [ind, row] in LQ_bldgs.sample(frac=1).iterrows():
                     rando_val = random.random()
                     if rando_val < LQ_rate['p_100']:
-                        losreg.at[ind,'LQloss'] = row['totalVal']
+                        losreg.at[ind,'LQloss'] = row['totalVal']*PLA
                     elif rando_val < (LQ_rate['p_100']+LQ_rate['p_50']):
-                        losreg.at[ind,'LQloss'] = 0.5*row['totalVal']
+                        losreg.at[ind,'LQloss'] = 0.5*row['totalVal']*PLA
             
             losreg['max_EQpolicy_loss'] = np.maximum(losreg['LQloss'], losreg['loss_pla'])
+            condition = losreg['max_EQpolicy_loss'] == losreg['LQloss']
+            losreg['LQLoss-real'] = np.where(condition, losreg['LQloss'], 0.0)
+            
             
             # Separate RES and COM
             RES = losreg[losreg['OccClass'].isin(['RES1', 'RES2'])]
@@ -111,7 +120,8 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                 if not data.empty:
                     GU_EQLQ_loss = data['max_EQpolicy_loss'].sum() #calc ground up (no BI/ALE) EQ/LQ losses (keep higher of EQ/LQ)
                     GU_EQOnly_loss = data['loss_pla'].sum() #calc ground up (no BI/ALE) EQ  only losses
-                    GU_LQOnly_loss = data['LQloss'].sum() #calc ground up (no BI/ALE) LQ only loss
+                    #GU_LQOnly_loss = data['LQloss'].sum() #calc ground up (no BI/ALE) LQ only loss
+                    GU_LQOnly_loss = data['LQloss-real'].sum() #calc ground up (no BI/ALE) LQ only loss ONLY WHERE IT'S GREATER THAN EQ loss (and is therefore the value getting saved).
                     ######################################################
                     ########## Would have added FFE here if doing more complex treatment, for csd's with (pop dens > 3000p/km2) and MMI>=6 (or existence of moderate damage?). Instead added below as modifier at the end. 
                     #####################################################
@@ -299,7 +309,7 @@ def main() -> int:
     rups = dstore.read_df('ruptures') #read oq ruptures
     sources = dstore.read_df('source_info'); sources = sources.reset_index() #read oq sources
     events = dstore.read_df('events') #read oq events
-    events = events.merge(rups[['id', 'source_id', 'mag', 'occurrence_rate']], left_on='rup_id', right_on='id', how='left', suffixes=('','_rup')) #add rupture id from rupture df
+    events = events.merge(rups[['id', 'source_id', 'mag', 'occurrence_rate', 'hypo_0','hypo_1']], left_on='rup_id', right_on='id', how='left', suffixes=('','_rup')) #add rupture id from rupture df
     events['source_name'] = sources.iloc[events["source_id"]].reset_index(drop=True)['source_id'] #grab source name from sources df, based on rupture id
     events['source_name'] = events['source_name'].str.decode("utf-8")
     del rups; del sources; gc.collect()

@@ -51,6 +51,7 @@ import gc
 import matplotlib.pyplot as plt
 import configparser
 import xml.etree.ElementTree as ET
+import math
 
 
 #### Calculation Timer
@@ -144,6 +145,16 @@ def inscalc(data,TYPE):
     return(claim_tot, deduc_tot, unins_tot)
 
 
+#### Haversine Formula for distance
+def haversine_vectorized(df, lat_col, lon_col, ref_lat, ref_lon):
+    R = 6371.0 # Earth radius in km
+    lat1 = np.radians(df[lat_col]); lon1 = np.radians(df[lon_col]); lat2 = np.radians(ref_lat); lon2 = np.radians(ref_lon) # Convert degrees to radians
+    dlat = lat2 - lat1; dlon = lon2 - lon1 # Differences in coordinates
+    a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a)) # Haversine formula
+    return R * c
+
+
 #### Map liquefaction susceptibility
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
@@ -185,6 +196,10 @@ ResTable = pd.DataFrame(columns=['APPROX_EQ_RP', 'mag', 'LOB', "GU_EQOnly_loss",
 #### Get source model information 
 rupfile = config["Rupture information"]["rupture_model_file"]
 mag = float(ET.parse(rupfile).find(".//{*}magnitude").text)
+lat = float(ET.parse(rupfile).find(".//{*}hypocenter").attrib['lat'])
+lon = float(ET.parse(rupfile).find(".//{*}hypocenter").attrib['lon'])
+ref_lat, ref_lon = lat, lon
+liq_dist = np.where((mag < 7.7), (mag - 6.463)/0.01, 450) #From Papathanassiou et al., 2005 for Aegean up to M7.6, otherwise max value from Tohoku of ~450.
 source = scen_lookup['sourcezone'][scen_lookup['scen'] == scenName].values[0]
 
 
@@ -223,6 +238,7 @@ print('Calculating insured losses')
 losreg = as_loss_by_event
 losreg['totalVal'] = losreg['structural_val']+losreg['nonstructural_val']+losreg['contents_val']
 losreg['LQloss'] = 0.0 # Add liq info, only for events with mag above liq thresh
+losreg['dist_to_epi'] = haversine_vectorized(losreg, 'lat', 'lon', ref_lat, ref_lon) # Calc distance to epi (for LQ losses)
 if mag >= mag_LQ_thresh:
     #print('debug: Adding liquefaction')
     data_gdf = gpd.GeoDataFrame(losreg, geometry=gpd.points_from_xy(losreg["lon"], losreg["lat"]), crs="EPSG:4617") #assuming lat/lon are in WGS84 would be EPSG:4326
@@ -232,24 +248,28 @@ if mag >= mag_LQ_thresh:
     if not missing.empty:
         nearest = gpd.sjoin_nearest(missing, surficial[["liq_class", "geometry"]], how="left", distance_col="distance_to_polygon")
         losreg_gdf.loc[nearest.index] = nearest
-    
+
     losreg = pd.DataFrame(losreg_gdf.drop(columns=["geometry", "index_right"]))
     
     # Calc the liq impact and propagate (careful not to conflate with shake loss)
     # Giving buildings in 'High' or 'Very High' LQ susc to have 4% chance of complete loss and 9% chance of 50% loss
     # May be small numbers so using probability per asset instead of total number of bldgs
     #LQ_bldgs = losreg[losreg['liq_class'].isin(['High','Very High'])]
-    LQ_bldgs = losreg[losreg['liq_class'].isin(['Very High'])] 
+    #LQ_bldgs = losreg[losreg['liq_class'].isin(['Very High'])] 
+    LQ_bldgs = losreg[(losreg['liq_class'].isin(['Very High'])) & (losreg['dist_to_epi'] < liq_dist)] 
     for [ind, row] in LQ_bldgs.sample(frac=1).iterrows():
         rando_val = random.random()
         if rando_val < LQ_rate['p_100']:
-            losreg.at[ind,'LQloss'] = row['totalVal']
+            losreg.at[ind,'LQloss'] = row['totalVal']*PLA
             #losreg.at[ind,'LQloss'] = 0.42*row['totalVal']
         elif rando_val < (LQ_rate['p_100']+LQ_rate['p_50']):
-            losreg.at[ind,'LQloss'] = 0.5*row['totalVal']
+            losreg.at[ind,'LQloss'] = 0.5*row['totalVal']*PLA
             #losreg.at[ind,'LQloss'] = 0.25*row['totalVal']
 
 losreg['max_EQpolicy_loss'] = np.maximum(losreg['LQloss'], losreg['loss_pla'])
+condition = losreg['max_EQpolicy_loss'] == losreg['LQloss']
+losreg['LQLoss-real'] = np.where(condition, losreg['LQloss'], 0.0)
+
 
 # Separate RES and COM
 RES = losreg[losreg['OccClass'].isin(['RES1', 'RES2'])]
@@ -273,7 +293,8 @@ for TYPE in ['RES','COM','PUB']:
     if not data.empty:
         GU_EQLQ_loss = data['max_EQpolicy_loss'].sum() #calc ground up (no BI/ALE) EQ/LQ losses (keep higher of EQ/LQ)
         GU_EQOnly_loss = data['loss_pla'].sum() #calc ground up (no BI/ALE) EQ  only losses
-        GU_LQOnly_loss = data['LQloss'].sum() #calc ground up (no BI/ALE) LQ only loss
+        #GU_LQOnly_loss = data['LQloss'].sum() #calc ground up (no BI/ALE) LQ only loss
+        GU_LQOnly_loss = data['LQLoss-real'].sum() #calc ground up (no BI/ALE) LQ only loss ONLY WHERE IT'S GREATER THAN EQ loss (and is therefore the value getting saved).
         ######################################################
         ########## Would have added FFE here if doing more complex treatment, for csd's with (pop dens > 3000p/km2) and MMI>=6 (or existence of moderate damage?). Instead added below as modifier at the end. 
         #####################################################

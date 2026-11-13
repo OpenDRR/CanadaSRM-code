@@ -8,7 +8,7 @@ import pandas as pd
 
 #### PARAMETERS
 insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
-CALC_ID = 40
+CALC_ID = 43
 RPs = np.array([100, 250, 500, 1000, 1250, 1650, 3300, 5000, 10000, 50000, 100000])
 #### add a check to make sure RPs are not lower than RPmin = eff-time/N for N=number events/years(which?) and not higher than effective cat length.
 
@@ -37,19 +37,28 @@ def interpolate_RP_losses(df, RPs, column):
 
 
 #### CALCULATE RP LOSSES AND SEND TO TABLE
-column = 'RP-year-TotCostToIns'
-column = 'RP-year-TotCostNotIns'
-national_interp = interpolate_RP_losses(national_RP, RPs, column)
+rnding = 1000000000 #round to nearest 1 billion
+cols = ['TotCostToIns','TotCostNotIns'] #must be 2 string entries, which represent uninsured and insured portion of total loss ('total loss' is calculated below by summing these).
+tot = pd.DataFrame(RPs, columns=['RP']); k = 0
+for d in [national_RP, east_RP, west_RP]: #must be national, east, west
+    k += 1
+    reg = pd.DataFrame(RPs, columns=['RP'])
+    for val in cols:
+        column = 'RP-year-'+val
+        ins = interpolate_RP_losses(d, RPs, column)
+        reg = reg.merge(ins)
+    reg['TOT'] = reg[cols[0]] + reg[cols[1]] #add a total loss column
+    reg = reg[['RP', 'TOT', cols[0], cols[1]]] #rearrange to match table
+    if k == 2:
+        tot = tot.merge(reg, on='RP', suffixes=('', '_EAST'))
+    elif k == 3:
+        tot = tot.merge(reg, on='RP', suffixes=('_NATL', '_WEST'))
+    else:
+        tot = tot.merge(reg, on='RP')
 
-
-
-
-###################################
-#TO DOs FROM PSY - ALL DONE
-#- addtl RPs at 1250, 1650, 3300
-#- separate east west ep curves and tables in the doc
-#- eq-insured asset base for BC, ON, QC, broken down by LOB.
-
+tot['RP'] = tot['RP']*rnding
+print((tot/rnding).round(1).to_csv(index=False))
+### copy paste output to MS word, highlight all, 'Insert > Table > Convert Text To Table'.
 
 
 

@@ -1,53 +1,80 @@
 # Python script to aggregate insProbLoss output csv's and create RP curves/files. Written by TEH in Aug 2026.
+######## USAGE
+######## > python aggInsProbLoss.py CALC_ID INI_FILENAME COMPUTE_RESOURCE
+######## where INI_FILENAME is the filename only (without path) and COMPUTE_RESOURCE is either 'AWS' or 'THlaptop'.
 
 import glob
 import pandas as pd
 import re
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import FuncFormatter, LogLocator
+from matplotlib.ticker import FuncFormatter, LogLocator, FixedLocator
 import sys
 
 #### Configuration - USER SPECIFIED
-CALC_ID = 34
-INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_500kyr_Expo2025.ini"
-#CALC_ID = int(sys.argv[1])
-#INI_FILENAME = sys.argv[2]
-insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
 loss_thresh = 1e6 #don't keep annual losses lower than this in loss_by_year outputs
 # could rewrite above param so it keeps any line with ins or unins total loss >.
 
-###################### NEED TO FIX BELOW TO DO YEAR NOT EVENT - Did I already??
+CALC_ID = 43
+INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_1Myr_Expo2025.ini"
+insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
+
+CALC_ID = int(sys.argv[1])
+INI_FILENAME_short = sys.argv[2]
+compute_resource = sys.argv[3]
+if compute_resource = 'AWS':
+    iniDir = "/work/CanadaSRM-code/ebRisk/input/"
+    insoutDir = "/work/CanadaSRM-output/probabilistic/current/ebRisk/ins-out"
+elif compute_resource = 'THlaptop':
+    iniDir = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/"
+    insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
+
+INI_FILENAME = str(iniDir)+str(INI_FILENAME_short)
+
+#############################################################################################
 #### Define RP function
 # assumes all events from catalogue time are in 'data'
 def get_RP(data, eff_time, loss_type):
     loss_by_year = data[['GU_EQOnly_loss',
        'GU_LQOnly_loss', 'GU_EQLQ_loss', 'ins_EQLQ_loss', 'PH_EQLQ_loss',
        'UI_EQLQ_loss', 'auto_EQLQ_loss', 'EQLQTotal', 'FFE_loss',
-       'tot_tsunami', 'ins_tsunami', 'TotCostToIns', 'TotCostNotIns', 'year']].groupby('year').sum().reset_index()
+       'tot_tsunami', 'ins_tsunami', 'TotCostToIns', 'TotCostNotIns', 'TOT', 'year']].groupby('year').sum().reset_index()
     for l in loss_type:
         ranked = loss_by_year[['year', str(l)]].sort_values(by=str(l), ascending=False).reset_index()
         ranked['RP-year-'+str(l)] = eff_time/((ranked.index)+1)
         loss_by_year = loss_by_year.merge(ranked[['year','RP-year-'+str(l)]], how='left', on='year')
     
-    loss_by_year = loss_by_year[loss_by_year[loss_type].gt(loss_thresh).any(axis=1)]
+    loss_by_year = loss_by_year[loss_by_year[loss_type].gt(loss_thresh).any(axis=1)] #only keep years with loss greater than threshold set at top
     return loss_by_year
 
 
 #### Define plotting function
-def plot_EP(regions, loss_type, loss_thresh):
-    region_colors = {'East': 'darkblue', 'West': 'darkgreen', 'Natl': 'indigo', 'RAWOQ_GU_EQ_LOSS': 'darkred'}
-    loss_styles = {'GU_EQOnly_loss': ':', 'TotCostToIns': '-', 'TotCostNotIns': '--', 'loss': '-'}
+region_colors = {'East': 'darkblue', 'West': 'darkgreen', 'Natl': 'indigo', 'RAWOQ_GU_EQ_LOSS': 'darkred'}
+loss_styles = {'GU_EQOnly_loss': ':', 'TotCostToIns': '-', 'TotCostNotIns': '-.', 'TOT':'--', 'loss_with_PLA': '-'}
+loss_names = {'GU_EQOnly_loss': 'GU Shake-only Loss before Insurance Applied', 'TotCostToIns': 'Portion of Total Loss Paid by Insurer', 'TotCostNotIns': 'Portion of Total Loss Paid by Property Owner', 'TOT':'Total Loss from Shake, Liq, Tsun, FFE', 'loss_with_PLA': 'Raw OQ GU Shake-only Loss with PLA'}
+def plot_EP(regions, loss_type, loss_thresh, xlimset, ylimset):
     fig, ax = plt.subplots(figsize=(10, 7))
     # Plot the three datasets per loss_type
     for l in loss_type:
         for r in regions:
             r = r[r[str(l)] > loss_thresh].sort_values(by=('RP-year-'+str(l)))
-            region = r.attrs.get('name')
-            ax.plot(r['RP-year-'+str(l)], r[str(l)] / 1e9, marker="", color=region_colors[str(region)], linestyle=loss_styles[str(l)], label=f'{region}-{l}')
+            region = r.attrs.get('name'); llabel = loss_names[str(l)]
+            ax.plot(r['RP-year-'+str(l)], r[str(l)] / 1e9, marker="", color=region_colors[str(region)], linestyle=loss_styles[str(l)], label=f'{region} - {llabel}')
+            # add a second axis with scatter plot of the LQ or EQ to EQLQ ratio
+            #r['EQtoEQLQRatio'] = r['GU_EQOnly_loss']/r['GU_EQLQ_loss']
+            #r['LQtoEQLQRatio'] = r['GU_LQOnly_loss']/r['GU_EQLQ_loss']
+            r['EQtoLQRatio'] = r['GU_EQOnly_loss']/r['GU_LQOnly_loss']
+            ax2 = ax.twinx()
+            #ax2.set_ylabel('EQ / EQLQ', color='tab:red')
+            #ax2.set_ylabel('LQ / EQLQ', color='tab:red')
+            ax2.set_ylabel('EQ / LQ', color='tab:red')
+            #ax2.scatter(r['RP-year-'+str(l)], r['EQtoEQLQRatio'], color=region_colors[str(region)])
+            #ax2.scatter(r['RP-year-'+str(l)], r['LQtoEQLQRatio'], color=region_colors[str(region)])
+            ax2.scatter(r['RP-year-'+str(l)], r['EQtoLQRatio'], color=region_colors[str(region)])
+            ax2.set_ylim([0,10])
     
-    # Log-log axes
-    ax.set_xscale("log"); ax.set_yscale("log")
+    # Log-log axes, nothing below 100yr RP
+    ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlim(xlimset); ax.set_ylim(ylimset)
     # Axis labels
     ax.set_xlabel("Return Period [years]", fontsize=12)
     ax.set_ylabel("Loss [billions of dollars]", fontsize=12)
@@ -59,16 +86,19 @@ def plot_EP(regions, loss_type, loss_thresh):
         FuncFormatter(lambda y, pos: f"${y:g}B")
     )
     # Add sensible log tick locations
-    ax.yaxis.set_major_locator(LogLocator(base=10)); ax.xaxis.set_major_locator(LogLocator(base=10))
+    ticks = np.concatenate([np.arange(0, 12, 2), np.arange(20, 120, 20), np.arange(200, 1200, 200), np.arange(2000, 12001, 2000)])
+    ax.xaxis.set_major_locator(FixedLocator(ticks)); ax.yaxis.set_major_locator(FixedLocator(ticks))
     # Grid and legend
     ax.grid(True, which="both", alpha=0.3)
     ax.legend(fontsize=11)
     plt.tight_layout()
-    #plt.show()
-    if (len(loss_type) == 1) & (loss_type[0] == 'loss'):
-        plt.savefig(insoutDir+'/'+regions[0].attrs.get('name')+'_'+str(CALC_ID)+'.png')
-    else:
-        plt.savefig(insoutDir+'/Result_'+str(CALC_ID)+'.png')
+    plt.show()
+#    if (len(loss_type) == 1) & (loss_type == 'loss_with_PLA'):
+#        plt.savefig(insoutDir+'/'+regions[0].attrs.get('name')+'_'+str(CALC_ID)+'.png')
+#    elif (len(loss_type) == 1):
+#        plt.savefig(insoutDir+'/'+loss_type[0]+'_'+str(CALC_ID)+'.png')
+#    else:
+#        plt.savefig(insoutDir+'/Result_'+str(CALC_ID)+'.png')
 
 
 #### Read csvs
@@ -76,14 +106,13 @@ events = pd.read_csv(str(insoutDir)+'/events_for_'+str(CALC_ID)+'.csv')
 df = pd.concat([pd.read_csv(f) for f in glob.glob(str(insoutDir) + '/Summary_' + str(CALC_ID) + '_2026*.csv')], ignore_index=True)
 
 
-#### Add 'year' back, get rid of 'eff_year'
-df = df[['eid', 'mag', 'occ_rate',
+#### get rid of 'RP_EQ-year', add cost to not insurance
+df = df[['eid', 'year', 'mag', 'occ_rate',
        'ss_region', 'GU_EQOnly_loss', 'GU_LQOnly_loss', 'GU_EQLQ_loss',
        'ins_EQLQ_loss', 'PH_EQLQ_loss', 'UI_EQLQ_loss', 'auto_EQLQ_loss',
        'EQLQTotal', 'FFE_loss', 'tot_tsunami', 'ins_tsunami',
        'TotCostToIns']]
 df['TotCostNotIns'] = df['PH_EQLQ_loss'] + df['UI_EQLQ_loss'] + (df['tot_tsunami']-df['ins_tsunami'])
-df['year'] = df['eid'].map(events.set_index('id')['year'])
 
 
 #### Get/calculate the effective calculation time
@@ -93,25 +122,43 @@ eff_time = number_of_logic_tree_samples * ses_per_logic_tree_path * investigatio
 
 #### Isolate east, west, natl
 # Only keep useful columns
-east = df[df['ss_region'] == 1]
-west = df[df['ss_region'] == 2]
+east = df[df['ss_region'] == 1]; east['TOT'] = east['TotCostToIns'] + east['TotCostNotIns']
+west = df[df['ss_region'] == 2]; west['TOT'] = west['TotCostToIns'] + west['TotCostNotIns']
 national = df.groupby(['eid','year','mag','occ_rate'], as_index=False).sum() #combine east and west
+national['TOT'] = national['TotCostToIns'] + national['TotCostNotIns']
 
 
 #### Get insured RPs and plot
-loss_type = ['GU_EQOnly_loss', 'TotCostToIns', 'TotCostNotIns'] #can be a single type or multiple
+loss_type = ['GU_EQOnly_loss', 'TotCostToIns', 'TotCostNotIns', 'TOT'] #can be a single type or multiple
 east_RP = get_RP(east, eff_time, loss_type); east_RP.attrs['name'] = 'East'
 west_RP = get_RP(west, eff_time, loss_type); west_RP.attrs['name'] = 'West'
 national_RP = get_RP(national, eff_time, loss_type); national_RP.attrs['name'] = 'Natl'
 regions = [east_RP, west_RP, national_RP]
-plot_EP(regions, loss_type, loss_thresh)
+xlimset = [100, 6000]; ylimup = 0; ylimdown = 100000
+for r in regions:
+    for l in loss_type:
+        closest_max = (r['RP-year-'+l] - xlimset[1]).abs().idxmin()
+        u = r.loc[closest_max, l]/1e9
+        closest_min = (r['RP-year-'+l] - xlimset[0]).abs().idxmin()
+        d = r.loc[closest_min, l]/1e9
+        ylimup = np.maximum(ylimup,u); ylimdown = np.minimum(ylimdown, d)
+    
+ylimset = [np.floor(ylimdown), np.ceil(ylimup/100)*100]
+loss_type = ['GU_EQOnly_loss']
+loss_type = ['TOT']
+loss_type = ['TotCostToIns']
+loss_type = ['TotCostNotIns']
+plot_EP(regions, loss_type, loss_thresh, xlimset, ylimset)
 
-loss_type = ['loss']
+
+#### Get losses from OQ event_loss_table, add PLA, and ensure it matches GU_EQOnly from ins calcs
+loss_type = ['loss_with_PLA']
 events['RP-year-loss'] = events['RP-year']
-events_by_year = events.groupby(['RP-year-loss','year'])['loss'].sum().reset_index()
+events['loss_with_PLA'] = events['loss']*events['PLA']
+events_by_year = events.groupby(['RP-year-loss','year'])['loss_with_PLA'].sum().reset_index()
 events_by_year.attrs['name'] = 'RAWOQ_GU_EQ_LOSS'
 regions = [events_by_year]
-plot_EP(regions, loss_type, loss_thresh)
+plot_EP(regions, loss_type, loss_thresh, xlimset, ylimset)
 
 
 #### Export regional and national RP data
@@ -126,7 +173,7 @@ national_RP.to_csv(str(insoutDir)+'/national_RP_Result_'+str(CALC_ID)+'.csv')
 
 exit()
 ################## plotting losses by source zone, region to figure out why eastern losses are so high and why liq losses are so high for M9.1 CSZ
-df = pd.concat([pd.read_csv(f) for f in glob.glob('./Summary_40_2026*.csv')], ignore_index=True)
+#df = pd.concat([pd.read_csv(f) for f in glob.glob('./Summary_40_2026*.csv')], ignore_index=True)
 ev = pd.read_csv('events_for_40.csv')
 ev[['sourcename','dummy']] = ev['source_name'].str.split(";", expand=True)
 df['sourcename'] = df['eid'].map(ev.set_index('id')['sourcename'])
