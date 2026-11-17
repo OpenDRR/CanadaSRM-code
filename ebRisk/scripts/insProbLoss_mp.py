@@ -36,7 +36,6 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
     #print('Calculating insured losses by event!')
     # isolate each event
     for eid in losses['event_id'].unique():
-        print('debug: working on eid: '+str(eid))
         as_loss_by_event = losses[losses['event_id'] == eid].copy()
         year = events[events['id'] == eid]['year'].values[0]
         RP = events[events['id'] == eid]['RP-year'].values[0]
@@ -52,23 +51,26 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
         as_loss_by_event = as_loss_by_event.merge(lookup,left_on="aid",right_on="ordinal",how="left") #add asset_id and ss_region to event losses
         missing = as_loss_by_event["asset_id"].isna().sum()
         if missing:
+            print('ERROR in matching asset ids')
             raise RuntimeError(f"{missing} aids could not be matched") 
-            
         # merge with expo
         as_loss_by_event = as_loss_by_event.merge(expo[['id','structural','nonstructural','contents','number','lon','lat','OccClass','pruid', 'fsauid']], left_on="asset_id", right_on="id", how="left"); as_loss_by_event = as_loss_by_event.drop(columns='id') #add expo
         
         # assign East (1) and West (2) by province
-        as_loss_by_event['ss_region'] = np.select([as_loss_by_event["pruid"].isin(Eprovs), as_loss_by_event["pruid"].isin(Wprovs)], [1, 2], default=np.nan).astype(int)
+        as_loss_by_event['ss_region'] = np.select([as_loss_by_event["pruid"].isin(Eprovs), as_loss_by_event["pruid"].isin(Wprovs)], [1, 2], default=0)
+        if (as_loss_by_event['ss_region'] == 0).any():
+            raise ValueError(
+                "Unassigned provinces: "
+                f"{as_loss_by_event.loc[as_loss_by_event['ss_region'] == 0, 'pruid'].unique()}")
         
         for region in as_loss_by_event['ss_region'].unique():
             # split by ss_region
             losreg = as_loss_by_event[as_loss_by_event['ss_region'] == region].copy()
             losreg['totalVal'] = losreg['structural']+losreg['nonstructural']+losreg['contents']
-            
             losreg['LQloss'] = 0.0 # Add liq info, only for events with mag above liq thresh
             losreg['dist_to_epi'] = haversine_vectorized(losreg, 'lat', 'lon', ref_lat, ref_lon) # Calc distance to epi (for LQ losses)
-            if (losreg['dist_to_epi'] < liq_dist).any() & (mag >= mag_thresh):
-                #print('debug: Adding liquefaction')
+            maxepidist = losreg['dist_to_epi'].max()
+            if (losreg['dist_to_epi'] < liq_dist).any() and (mag >= mag_LQ_thresh):
                 data_gdf = gpd.GeoDataFrame(losreg, geometry=gpd.points_from_xy(losreg["lon"], losreg["lat"]), crs="EPSG:4617") #assuming lat/lon are in WGS84 would be EPSG:4326
                 data_gdf = data_gdf.to_crs(surficial.crs)
                 losreg_gdf = gpd.sjoin(data_gdf, surficial[["liq_class", "geometry"]], how="left", predicate="intersects")
@@ -76,15 +78,10 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                 if not missing.empty:
                     nearest = gpd.sjoin_nearest(missing, surficial[["liq_class", "geometry"]], how="left", distance_col="distance_to_polygon")
                     losreg_gdf.loc[nearest.index] = nearest
-                
                 losreg = pd.DataFrame(losreg_gdf.drop(columns=["geometry", "index_right"]))
-                
                 # Calc the liq impact and propagate (careful not to conflate with shake loss)
-                # Giving buildings in 'High' or 'Very High' LQ susc to have 4% chance of complete loss and 9% chance of 50% loss
                 # May be small numbers so using probability per asset instead of total number of bldgs
-                
                 ####### DO THIS AS MATRIX NOT LOOP?!!?
-                
                 #LQ_bldgs = losreg[losreg['liq_class'].isin(['High','Very High'])]
                 #LQ_bldgs = losreg[losreg['liq_class'].isin(['Very High'])]
                 LQ_bldgs = losreg[(losreg['liq_class'].isin(['Very High'])) & (losreg['dist_to_epi'] < liq_dist)]
@@ -94,20 +91,15 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                         losreg.at[ind,'LQloss'] = row['totalVal']*PLA
                     elif rando_val < (LQ_rate['p_100']+LQ_rate['p_50']):
                         losreg.at[ind,'LQloss'] = 0.5*row['totalVal']*PLA
-            
             losreg['max_EQpolicy_loss'] = np.maximum(losreg['LQloss'], losreg['loss_pla'])
             condition = losreg['max_EQpolicy_loss'] == losreg['LQloss']
             losreg['LQLoss-real'] = np.where(condition, losreg['LQloss'], 0.0)
-            
-            
             # Separate RES and COM
             RES = losreg[losreg['OccClass'].isin(['RES1', 'RES2'])]
             COM = losreg[losreg['OccClass'].isin(['RES3A', 'RES3C', 'RES3D', 'RES3B', 'RES3F', 'RES3E','RES3','RES4','RES5', 'RES6', 'COM1', 'COM2','COM3','COM4','COM5','COM6','COM7', 'COM8', 'COM9','COM10','IND1', 'IND2', 'IND3', 'IND4', 'IND5', 'IND6', 'AGR1', 'REL1'])]
             PUB = losreg[~losreg['OccClass'].isin(['RES1', 'RES2','RES3A', 'RES3C', 'RES3D', 'RES3B', 'RES3F', 'RES3E','RES3','RES4','RES5', 'RES6', 'COM1', 'COM2','COM3','COM4','COM5','COM6','COM7', 'COM8', 'COM9','COM10','IND1', 'IND2', 'IND3', 'IND4', 'IND5', 'IND6', 'AGR1', 'REL1'])]
-            
             # Run calculations on each line of business (LOB)
             for TYPE in ['RES','COM','PUB']:
-                #print('debug: working on TYPE: '+TYPE)
                 # set insurance parameters (p_rate, lim, deduc) by FSA and LoB 
                 if TYPE == 'RES':
                     data = RES
@@ -117,7 +109,7 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                     data = data.merge(COMparams[['FSA','EQDeducPerc','EQLimPerc','EQ_Pene']], how="left", left_on="fsauid", right_on="FSA").drop(columns='FSA')
                 else:
                     data = PUB
-                
+                    
                 # Insurance calculation
                 if not data.empty:
                     GU_EQLQ_loss = data['max_EQpolicy_loss'].sum() #calc ground up (no BI/ALE) EQ/LQ losses (keep higher of EQ/LQ)
@@ -132,13 +124,11 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                     else:
                         [claim_tot, deduc_tot, unins_tot] = inscalc(data,TYPE) #run insurance calculation
                     ResTable.loc[len(ResTable)] = [eid, year, RP, mag, occ_rate, region, TYPE, GU_EQOnly_loss, GU_LQOnly_loss, GU_EQLQ_loss, claim_tot, deduc_tot, unins_tot] # add info to result table
-                    
-                    del data; gc.collect()
+                    #del data; gc.collect()
                     
             del RES; del COM; del PUB; gc.collect()
             
         del losreg; gc.collect()
-    
     
     #### Sum insured loss by LOB for total event loss, add auto loss and sum shake total
     summary = ResTable.groupby(["eid", "year", "RP_EQ-year", 'mag', 'occ_rate', "ss_region"])[["GU_EQOnly_loss", "GU_LQOnly_loss", "GU_EQLQ_loss","ins_EQLQ_loss","PH_EQLQ_loss","UI_EQLQ_loss"]].sum().reset_index()
@@ -159,10 +149,10 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
     # Add tsunami for those events
     summary['tot_tsunami'] = 0; summary['ins_tsunami'] = 0
     for eid in CSZ_eids:
-        if summary[summary['eid'] == eid].index.values:
-            for ind_val in summary[summary['eid'] == eid].index.values:
-                summary.at[ind_val, 'tot_tsunami'] = summary.iloc[ind_val]['EQLQTotal']*(4273/49972)
-                summary.at[ind_val, 'ins_tsunami'] = summary.iloc[ind_val]['ins_EQLQ_loss']*(1117/17078)
+        indices = summary.index[summary['eid'] == eid]
+        for ind_val in indices:
+            summary.at[ind_val, 'tot_tsunami'] = summary.iloc[ind_val]['EQLQTotal']*(4273/49972)
+            summary.at[ind_val, 'ins_tsunami'] = summary.iloc[ind_val]['ins_EQLQ_loss']*(1117/17078)
     
     
     #### Calculate total cost to the insurance sector
@@ -172,7 +162,7 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
     parquetFileName = Path(filePath).name.split('_losses_')[1].split('.parquet')[0]
     
     #### Save Results
-    print('Saving results for ${CALC_ID} ${parquetFileName}')
+    print(f"Saving results for CALC_ID {CALC_ID}, parq file {parquetFileName}")
     #print(ResTable)
     ResTable.to_csv(str(outdir)+'/Shake_by_LOB_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv', index=False)
     summary.to_csv(str(outdir)+'/Summary_'+str(CALC_ID)+'_'+str(parquetFileName)+'.csv', index=False)
@@ -220,16 +210,17 @@ def main() -> int:
     # Can also call functions here
     ######################################################################
     #CALC_ID = 322 #ebRisk calculation
-    #INI_FILENAME = "/Users/thobbs/Documents/GitHub/canada-srm2/ebRisk/input/ebRisk_b0_Canada_tinyInsuranceTest.ini"
-    #CALC_ID=34
-    #INI_FILENAME = "/work/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_500kyr_Expo2025.ini"
+    #INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_tinyInsuranceTest.ini"
+    #CALC_ID=44
+    #INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_1Myr_Expo2025.ini"
     CALC_ID = int(sys.argv[1])
     INI_FILENAME = sys.argv[2]
     COMPUTE_RESOURCE="AWS" #"THlaptop" #"AWS"
     
     # Local file locations
     if COMPUTE_RESOURCE == "THlaptop":
-        PARQUET_DIR = "/Users/thobbs/Documents/GitHub/canada-srm2/Parquets_firstRun/" #Where parquet files were output from ebRisk
+        #PARQUET_DIR = "/Users/thobbs/Documents/GitHub/canada-srm2/Parquets_firstRun/" #Where parquet files were output from ebRisk
+        PARQUET_DIR = "/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/test_parqs/"
         expofile = '/Users/thobbs/Documents/CanadaSRM-input/current/exposure/oqBldgExp_CA_2025Update.csv'
         surfgeolfile = '/Users/thobbs/Documents/gsc_surficial_geology.gdb'
         outdir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out' #for result tables
@@ -241,6 +232,9 @@ def main() -> int:
         outdir = "/work/CanadaSRM-output/probabilistic/current/ebRisk/ins-out"
         insParamFile="/work/CanadaSRM-code/ebRisk/scripts/InsParamsByFSA.csv"
     ###########################################################################
+    
+    # Create output folder if not exists
+    Path(outdir+"/").mkdir(parents=True, exist_ok=True)
     
     # insurance params: penetration rate, deductible, policy limit
     ins_params = pd.read_csv(insParamFile)
@@ -352,18 +346,26 @@ def main() -> int:
     #### Configure multiprocessing
     numProcs = os.cpu_count()
     cwd = os.getcwd()
+    results = []
     
     # List all parquet filenames
     parquetFiles = glob.glob(PARQUET_DIR + "/asset_event_losses_*.parquet")
-
-    # Create output folder if not exists
-    Path(outdir+"/").mkdir(parents=True, exist_ok=True)
-
+    
     with Pool(processes=numProcs) as pool:
         for parquetFile in parquetFiles:
-            pool.apply_async(processFile, (parquetFile, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, mag_LQ_thresh, surficial, LQ_rate, RESparams, COMparams, ffe_lookup, outdir)) #processFile is function, second argument to apply_async is an array of arguments to pass to the function. 
+            result = pool.apply_async(processFile, (parquetFile, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, mag_LQ_thresh, surficial, LQ_rate, RESparams, COMparams, ffe_lookup, outdir)) #processFile is function, second argument to apply_async is an array of arguments to pass to the function. 
+            results.append((parquetFile, result))
 
         pool.close()
+        for parquetFile, result in results:
+            try:
+                result.get()
+                
+            except Exception as e:
+                print(f"\nERROR processing {parquetFile}")
+                print(f"{type(e).__name__}: {e}")
+                raise
+        
         pool.join()
 
     print("Processing has finished")
