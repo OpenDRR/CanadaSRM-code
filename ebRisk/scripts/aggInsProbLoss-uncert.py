@@ -28,10 +28,10 @@ insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRi
 CALC_ID = int(sys.argv[1])
 INI_FILENAME_short = sys.argv[2]
 compute_resource = sys.argv[3]
-if compute_resource = 'AWS':
+if compute_resource == 'AWS':
     iniDir = "/work/CanadaSRM-code/ebRisk/input/"
     insoutDir = "/work/CanadaSRM-output/probabilistic/current/ebRisk/ins-out"
-elif compute_resource = 'THlaptop':
+elif compute_resource == 'THlaptop':
     iniDir = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/"
     insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
 

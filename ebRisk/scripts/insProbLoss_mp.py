@@ -13,6 +13,7 @@ import warnings
 import sys
 import re
 import gc
+from scipy.special import lambertw
 
 # This is start of concurrency
 def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, mag_LQ_thresh, surficial, LQ_rate, RESparams, COMparams, ffe_lookup, outdir):
@@ -43,7 +44,8 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
         lat = events[events['id'] == eid]['hypo_1'].values[0]
         lon = events[events['id'] == eid]['hypo_0'].values[0]
         ref_lat, ref_lon = lat, lon
-        liq_dist = np.where((mag < 7.7), (mag - 6.463)/0.01, 450) #From Papathanassiou et al., 2005 for Aegean up to M7.6, otherwise max value from Tohoku of ~450.
+        #liq_dist = np.where((mag < 7.7), (mag - 6.463)/0.01, 450) #From Papathanassiou et al., 2005 for Aegean up to M7.6, otherwise max value from Tohoku of ~450.
+        liq_dist = liqdist(mag) #Hu 2023 liquefaction boundary distance, from epicentre, in km.
         occ_rate = events[events['id'] == eid]['occurrence_rate'].values[0]
         PLA = events[events['id'] == eid]['PLA'].values[0]
         as_loss_by_event['loss_pla'] = as_loss_by_event['loss']*PLA #get loss with amplification
@@ -65,7 +67,7 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
             
             losreg['LQloss'] = 0.0 # Add liq info, only for events with mag above liq thresh
             losreg['dist_to_epi'] = haversine_vectorized(losreg, 'lat', 'lon', ref_lat, ref_lon) # Calc distance to epi (for LQ losses)
-            if mag >= mag_LQ_thresh:
+            if (losreg['dist_to_epi'] < liq_dist).any() & (mag >= mag_thresh):
                 #print('debug: Adding liquefaction')
                 data_gdf = gpd.GeoDataFrame(losreg, geometry=gpd.points_from_xy(losreg["lon"], losreg["lat"]), crs="EPSG:4617") #assuming lat/lon are in WGS84 would be EPSG:4326
                 data_gdf = data_gdf.to_crs(surficial.crs)
@@ -121,7 +123,7 @@ def processFile(filePath, CALC_ID, lbe, events, lookup, expo, Eprovs, Wprovs, ma
                     GU_EQLQ_loss = data['max_EQpolicy_loss'].sum() #calc ground up (no BI/ALE) EQ/LQ losses (keep higher of EQ/LQ)
                     GU_EQOnly_loss = data['loss_pla'].sum() #calc ground up (no BI/ALE) EQ  only losses
                     #GU_LQOnly_loss = data['LQloss'].sum() #calc ground up (no BI/ALE) LQ only loss
-                    GU_LQOnly_loss = data['LQloss-real'].sum() #calc ground up (no BI/ALE) LQ only loss ONLY WHERE IT'S GREATER THAN EQ loss (and is therefore the value getting saved).
+                    GU_LQOnly_loss = data['LQLoss-real'].sum() #calc ground up (no BI/ALE) LQ only loss ONLY WHERE IT'S GREATER THAN EQ loss (and is therefore the value getting saved).
                     ######################################################
                     ########## Would have added FFE here if doing more complex treatment, for csd's with (pop dens > 3000p/km2) and MMI>=6 (or existence of moderate damage?). Instead added below as modifier at the end. 
                     #####################################################
@@ -196,6 +198,21 @@ def inscalc(data,TYPE):
     unins_tot = data['unins_loss'].sum()
     return(claim_tot, deduc_tot, unins_tot)
 
+#### Haversine Formula for distance
+def haversine_vectorized(df, lat_col, lon_col, ref_lat, ref_lon):
+    R = 6371.0 # Earth radius in km
+    lat1 = np.radians(df[lat_col]); lon1 = np.radians(df[lon_col]); lat2 = np.radians(ref_lat); lon2 = np.radians(ref_lon) # Convert degrees to radians
+    dlat = lat2 - lat1; dlon = lon2 - lon1 # Differences in coordinates
+    a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a)) # Haversine formula
+    return R * c
+
+#### Define function for calculating maximum distance for liquefaction
+def liqdist(Mw):
+    a = (1.8302e-3 / 0.7263) * np.log(10)
+    Remax = lambertw(a * 10**((Mw - 5.0712) / 0.7263)).real/a
+    return(Remax)
+
 def main() -> int:
     
     ######################################################################
@@ -233,7 +250,7 @@ def main() -> int:
     # Misc secondary peril parameters
     #make_densecsds = False #Set to True if you need to create a list of csd's with pop density over 3000/km2 ('popdensCSD.txt'). Else assume it exists in location specified above. NOT IN USE YET, for FFE.
     LQ_rate = {'p_100': 0.04, 'p_50': 0.09} #probability of having 100% or 50% loss, for bldgs with High/Very High LQ susceptibility
-    mag_LQ_thresh = 6.5 #minimum magnitude of earthquake to create liquefaction
+    mag_LQ_thresh = 5.0 #minimum magnitude of earthquake to create liquefaction, from Green & Bommer 2019
 
 
     #### Get/calculate the effective calculation time
