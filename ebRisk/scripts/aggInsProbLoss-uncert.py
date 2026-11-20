@@ -21,9 +21,9 @@ from collections import defaultdict
 RPs = np.array([100, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 1650, 1750, 2000, 2250, 2475, 2750, 3000, 3300, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 9000, 10000, 20000, 40000, 50000, 60000, 80000, 100000])
 percs = np.array([0.05, 0.95]) #specify only 2, in order (currently setup to take 'low' as the second number and 'high' as the first number). Meaning is "5% of realizations have higher loss than the 0.05 perc".
 
-CALC_ID = 43
-INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_1Myr_Expo2025.ini"
-insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
+#CALC_ID = 43
+#INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/ebRisk/input/ebRisk_b0_Canada_1Myr_Expo2025.ini"
+#insoutDir = '/Users/thobbs/Documents/CanadaSRM-output/probabilistic/current/ebRisk/ins-out'
 
 CALC_ID = int(sys.argv[1])
 INI_FILENAME_short = sys.argv[2]

@@ -33,7 +33,7 @@ oqIndir="/work/CanadaSRM-code/ebRisk/input"
 oqOutdir="/work/CanadaSRM-output/probabilistic/current/ebRisk/oq-out"
 scriptDir="/work/CanadaSRM-code/ebRisk/scripts"
 insScript="${scriptDir}/insProbLoss_mp.py"
-aggScript="${scriptDir}/aggInsProbLoss.py"
+aggScript="${scriptDir}/aggInsProbLoss-uncert.py"
 oqdataDir="/home/ssm-user/oqdata"
 parqDir="/scratch/parquet-out/current"
 quants="False" #if True assumes quantiles of 0.05, 0.5, 0.95
@@ -46,7 +46,17 @@ mkdir -p ${oqOutdir}/temp; rm -f ${oqOutdir}/temp/*
 prov=$region; mkdir -p ${oqOutdir}/${prov}
 parqBackDir="${parqDir%current}backup-$(date +"%Y-%m-%d_%H%M")/"
 mkdir -p $parqBackDir 
-[ -f "${parqDir}/*.parquet" ] && mv ${parqDir}/*.parquet $parqBackDir #backup any existing parquet files
+found=false
+for file in "${parqDir}"/*.parquet; do
+    if [ -f "$file" ]; then
+        found=true
+        break
+    fi
+done
+if [ "$found" = true ]; then
+    mv ${parqDir}/*.parquet $parqBackDir #backup any existing parquet files
+fi
+#[ -f "${parqDir}"/*.parquet ] && mv ${parqDir}/*.parquet $parqBackDir #backup any existing parquet files
 #If you're confused, use time stamps to figure out when the parqs must've been made
 
 ### SETUP AWS KILL
@@ -116,9 +126,9 @@ echo "============================================================"
 ### RUN INS/2PER MODULE
 python ${insScript} $CALC_ID ${oqIndir}/${iniFileName} #&> ${oqOutdir}/${prov}/ebR_${region}_inslog.log
 
-python $aggScript $CALC_ID ${oqIndir}/${iniFileName}
+python $aggScript $CALC_ID ${iniFileName} AWS
 
-echo "Python processing completed successfully."
+echo "Python processing completed, hopefully."
 
 
 

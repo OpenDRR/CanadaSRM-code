@@ -52,6 +52,7 @@ import matplotlib.pyplot as plt
 import configparser
 import xml.etree.ElementTree as ET
 import math
+from scipy.special import lambertw
 
 
 #### Calculation Timer
@@ -61,8 +62,16 @@ start_time = time.perf_counter()
 #### Set run parameters
 if len(sys.argv) < 2:
     print("No arguments were provided - using hard-coded values.")
-    CALC_ID = 30 #ebRisk calculation
-    INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/scenario/input/s_Risk_SCM7p5_MontrealIapetan_b0_b.ini"
+    #CALC_ID = 33 #ebRisk calculation
+    #INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/scenario/input/s_Risk_ACM7p0_GeorgiaStraitASHOCK_b0_b.ini"
+    #CALC_ID = 32
+    #INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/scenario/input/s_Risk_SCM5p8_MontrealIapetan_b0_b.ini"
+    #CALC_ID = 30
+    #INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/scenario/input/s_Risk_SCM7p5_MontrealIapetan_b0_b.ini"
+    #CALC_ID = 41
+    #INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/scenario/input/s_Risk_SIM9p1_CascadiaInterfaceBestFault_b0_b.ini"
+    CALC_ID = 28
+    INI_FILENAME = "/Users/thobbs/Documents/CanadaSRM-code/scenario/input/s_Risk_SIM9p2_CascadiaInterfaceBestFault_b0_b.ini"
     COMPUTE_RESOURCE="THlaptop"
 elif len(sys.argv) == 4:
     print(f"Arguments provided: {sys.argv[1:]}")
@@ -103,7 +112,7 @@ COMparams = ins_params[ins_params['LoB'] == 'C']
 # Misc secondary peril parameters
 #make_densecsds = False #Set to True if you need to create a list of csd's with pop density over 3000/km2 ('popdensCSD.txt'). Else assume it exists in location specified above. NOT IN USE YET, for FFE.
 LQ_rate = {'p_100': 0.04, 'p_50': 0.09} #probability of having (100% or 50%)/(42% or 25%) loss, for bldgs with sufficiently high LQ susceptibility. See notes from Sept 18, 2026. 
-mag_LQ_thresh = 6.5 #minimum magnitude of earthquake to create liquefaction
+mag_LQ_thresh = 5.0 #6.5 #minimum magnitude of earthquake to create liquefaction from Green & Bommer
 
 # Provide APPROXIMATE return periods and source loc for scenarios, for PLA, FFE and TSUNAMI ONLY (below)
 scen_lookup = pd.DataFrame({
@@ -155,6 +164,13 @@ def haversine_vectorized(df, lat_col, lon_col, ref_lat, ref_lon):
     return R * c
 
 
+#### Define function for calculating maximum distance for liquefaction
+def liqdist(Mw):
+    a = (1.8302e-3 / 0.7263) * np.log(10)
+    Remax = lambertw(a * 10**((Mw - 5.0712) / 0.7263)).real/a
+    return(Remax)
+
+
 #### Map liquefaction susceptibility
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
@@ -199,7 +215,8 @@ mag = float(ET.parse(rupfile).find(".//{*}magnitude").text)
 lat = float(ET.parse(rupfile).find(".//{*}hypocenter").attrib['lat'])
 lon = float(ET.parse(rupfile).find(".//{*}hypocenter").attrib['lon'])
 ref_lat, ref_lon = lat, lon
-liq_dist = np.where((mag < 7.7), (mag - 6.463)/0.01, 450) #From Papathanassiou et al., 2005 for Aegean up to M7.6, otherwise max value from Tohoku of ~450.
+#liq_dist = np.where((mag < 7.7), (mag - 6.463)/0.01, 450) #From Papathanassiou et al., 2005 for Aegean up to M7.6, otherwise max value from Tohoku of ~450.
+liq_dist = liqdist(mag) #Hu 2023 liquefaction boundary distance, from epicentre, in km.
 source = scen_lookup['sourcezone'][scen_lookup['scen'] == scenName].values[0]
 
 
@@ -239,7 +256,8 @@ losreg = as_loss_by_event
 losreg['totalVal'] = losreg['structural_val']+losreg['nonstructural_val']+losreg['contents_val']
 losreg['LQloss'] = 0.0 # Add liq info, only for events with mag above liq thresh
 losreg['dist_to_epi'] = haversine_vectorized(losreg, 'lat', 'lon', ref_lat, ref_lon) # Calc distance to epi (for LQ losses)
-if mag >= mag_LQ_thresh:
+if (losreg['dist_to_epi'] < liq_dist).any() and (mag >= mag_LQ_thresh):
+#if mag >= mag_LQ_thresh:
     #print('debug: Adding liquefaction')
     data_gdf = gpd.GeoDataFrame(losreg, geometry=gpd.points_from_xy(losreg["lon"], losreg["lat"]), crs="EPSG:4617") #assuming lat/lon are in WGS84 would be EPSG:4326
     data_gdf = data_gdf.to_crs(surficial.crs)
